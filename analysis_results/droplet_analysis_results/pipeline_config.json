@@ -1,0 +1,41 @@
+{
+  "channel": {
+    "channel_width_px": 200,
+    "vertical_channel": true,
+    "wall_margin_px": 5
+  },
+  "detection": {
+    "brightness_threshold": 60,
+    "adaptive_block_size": 31,
+    "adaptive_constant": -8,
+    "difference_threshold": 40,
+    "use_reference_subtraction": true,
+    "min_crystal_area_px": 100,
+    "max_crystal_area_px": 50000,
+    "min_circularity": 0.0,
+    "morph_open_kernel": 3,
+    "morph_close_kernel": 5,
+    "nucleation_min_area_px": 15,
+    "nucleation_max_area_px": 300,
+    "nucleation_sensitivity": 3.0
+  },
+  "tracking": {
+    "max_linking_distance_px": 50,
+    "max_gap_frames": 3,
+    "min_track_length": 3
+  },
+  "multi_droplet": {
+    "num_droplets": 130,
+    "grid_rows": 10,
+    "grid_cols": 13,
+    "snapshot_interval_sec": 60.0,
+    "gantry_cycle_time_sec": 300.0
+  },
+  "output": {
+    "export_dir": "./results",
+    "annotated_dir": "./results/annotated",
+    "save_annotated_images": true,
+    "export_format": "csv",
+    "image_format": "png"
+  }
+}
