@@ -1,4 +1,4 @@
-# Crystal Monitor
+# ProCrystal Monitor
 
 **Automated nucleation and crystal growth detection for biomolecule crystallization in microfluidic droplets using polarized microscopy.**
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-Crystal Monitor is a Python-based image analysis pipeline that automatically detects, tracks, and quantifies crystal nucleation and growth in time-lapse microscopy images. Designed for high-throughput crystallization screening in microfluidic devices with support for up to 130 parallel droplets.
+ProCrystal Monitor is a Python-based image analysis pipeline that automatically detects, tracks, and quantifies crystal nucleation and growth in time-lapse microscopy images. Designed for high-throughput crystallization screening in microfluidic devices with support for up to 130 parallel droplets.
 
 ### Key Features
 
