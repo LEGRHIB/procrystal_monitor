@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Crystal Annotator — Multi-Crystal</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ─── reset & base ───────────────────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     background:#0d1117;color:#c9d1d9;display:flex;flex-direction:column;height:100vh}
+
+/* ─── top bar ────────────────────────────────────────────────────────────── */
+#topbar{display:flex;align-items:center;gap:10px;padding:8px 14px;
+        background:#161b22;border-bottom:1px solid #30363d;flex-shrink:0}
+#topbar label{font-size:13px;color:#8b949e}
+#topbar select,#topbar input{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+        border-radius:4px;padding:4px 8px;font-size:13px}
+#topbar select{min-width:200px}
+
+/* ─── main area ──────────────────────────────────────────────────────────── */
+#main{display:flex;flex:1;overflow:hidden}
+
+/* ─── canvas panel (left) ────────────────────────────────────────────────── */
+#canvas-panel{flex:1;display:flex;flex-direction:column;align-items:center;
+              justify-content:center;position:relative;overflow:hidden;background:#010409}
+#frame-info{position:absolute;top:8px;left:12px;font-size:12px;color:#8b949e;
+            background:rgba(0,0,0,.6);padding:4px 10px;border-radius:4px;z-index:5}
+canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
+#measure-hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+              font-size:13px;color:#ffa657;background:rgba(0,0,0,.7);padding:5px 14px;
+              border-radius:4px;display:none;z-index:5}
+
+/* ─── sidebar (right) ────────────────────────────────────────────────────── */
+#sidebar{width:380px;flex-shrink:0;border-left:1px solid #30363d;display:flex;
+         flex-direction:column;background:#161b22;overflow-y:auto}
+#sidebar h3{font-size:13px;color:#8b949e;padding:10px 12px 4px;text-transform:uppercase;
+            letter-spacing:.5px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid #30363d;
+     border-radius:6px;background:#21262d;color:#c9d1d9;font-size:13px;cursor:pointer;
+     transition:background .15s}
+.btn:hover{background:#30363d}
+.btn.active{background:#1f6feb;border-color:#1f6feb;color:#fff}
+.btn.success{background:#238636;border-color:#238636;color:#fff}
+.btn.danger{background:#da3633;border-color:#da3633;color:#fff}
+.btn-row{display:flex;gap:6px;padding:6px 12px;flex-wrap:wrap}
+
+/* crystal list */
+#crystals-list{padding:0 12px 12px;overflow-y:auto;max-height:200px}
+.crystal-item{display:flex;align-items:center;justify-content:space-between;
+              padding:8px;border:1px solid #30363d;border-radius:4px;margin-bottom:6px;
+              background:#21262d;cursor:pointer;transition:background .15s}
+.crystal-item:hover{background:#30363d}
+.crystal-item.selected{border-color:#1f6feb;background:#1f6feb;color:#fff}
+.crystal-item.selected .nuc-indicator{color:#fff}
+.crystal-item .name{font-weight:600;font-size:13px}
+.crystal-item .nuc-indicator{font-size:11px;color:#6e7681}
+.crystal-item .delete-btn{cursor:pointer;color:#f85149;padding:2px 6px;font-size:13px;
+                           display:none}
+.crystal-item:hover .delete-btn{display:block}
+
+/* measurement section */
+#measure-section{padding:6px 12px}
+#measure-section label{font-size:12px;color:#8b949e;display:block;margin-bottom:4px}
+.btn-row.measure-btns{gap:4px}
+.btn-row.measure-btns .btn{font-size:12px;padding:4px 8px}
+
+/* measurements list */
+#measurements{flex:1;overflow-y:auto;padding:0 12px 12px}
+.meas-item{display:flex;align-items:center;justify-content:space-between;
+           font-size:12px;padding:5px 8px;border-bottom:1px solid #21262d}
+.meas-item.for-crystal{background:rgba(31,111,235,.1)}
+.meas-item .info{display:flex;flex-direction:column;gap:1px}
+.meas-item .val{color:#58a6ff;font-weight:600}
+.meas-item .meta{color:#6e7681;font-size:11px}
+.meas-item .del{cursor:pointer;color:#f85149;font-size:14px;padding:2px 6px;
+                border-radius:3px}
+.meas-item .del:hover{background:rgba(248,81,73,.15)}
+
+/* dashboard */
+#dashboard{padding:6px 12px 12px;font-size:12px}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dash-card{background:#21262d;border:1px solid #30363d;border-radius:6px;padding:8px}
+.dash-title{font-size:11px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;
+            letter-spacing:.5px}
+.dash-row{display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap}
+.dash-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:6px}
+.dash-table th,.dash-table td{border-bottom:1px solid #30363d;padding:4px 6px;text-align:left}
+.dash-table th{color:#8b949e;font-weight:600}
+.dash-muted{color:#6e7681}
+
+/* bottom bar */
+#bottombar{display:flex;align-items:center;justify-content:space-between;
+           padding:6px 14px;background:#161b22;border-top:1px solid #30363d;
+           font-size:11px;color:#6e7681;flex-shrink:0}
+
+/* hotkey hints */
+.hotkey{display:inline-block;background:#30363d;border-radius:3px;padding:1px 5px;
+        font-family:monospace;font-size:11px;color:#c9d1d9;margin-left:2px}
+
+/* growth chart */
+#chart-section{padding:0 12px 12px}
+#chart-wrap{background:#21262d;border:1px solid #30363d;border-radius:6px;
+            padding:8px;position:relative;height:200px}
+</style>
+</head>
+<body>
+
+<!-- ═══ TOP BAR ═══════════════════════════════════════════════════════════ -->
+<div id="topbar">
+  <label>Experiment:</label>
+  <select id="exp-select"><option value="">— loading —</option></select>
+  <span style="color:#30363d">│</span>
+  <button class="btn" id="btn-prev" title="Previous frame  [←]">← Prev</button>
+  <button class="btn" id="btn-next" title="Next frame  [→]">Next →</button>
+  <span style="color:#30363d">│</span>
+  <span id="nav-label" style="font-size:13px;color:#8b949e">No experiment</span>
+</div>
+
+<!-- ═══ MAIN AREA ═════════════════════════════════════════════════════════ -->
+<div id="main">
+
+  <!-- canvas -->
+  <div id="canvas-panel">
+    <div id="frame-info">—</div>
+    <canvas id="cv" width="1280" height="960"></canvas>
+    <div id="measure-hint"></div>
+  </div>
+
+  <!-- sidebar -->
+  <div id="sidebar">
+
+    <h3>Crystals</h3>
+    <div class="btn-row">
+      <button class="btn success" id="btn-new-crystal" title="Create a new crystal">
+        ✚ New Crystal
+      </button>
+    </div>
+    <div id="crystals-list"></div>
+
+    <h3>Measurement</h3>
+    <div id="measure-section">
+      <div style="margin-bottom:8px">
+        <button class="btn" id="btn-calibrate-tube" title="Measure tube width for calibration  [T]">
+          📏 Calibrate (1.5mm tube) <span class="hotkey">T</span>
+        </button>
+        <button class="btn" id="btn-measure-droplet" title="Measure droplet height (vertical)  [D]">
+          💧 Droplet Height <span class="hotkey">D</span>
+        </button>
+        <button class="btn" id="btn-auto-crop" title="Auto-detect droplet and crop canvas  [A]" onclick="autoDetectDroplet()">
+          🔍 Auto Crop <span class="hotkey">A</span>
+        </button>
+        <button class="btn" id="btn-enhance" title="Temporal-enhance (subtract ref frame)  [E]" onclick="toggleEnhanced()">
+          ✨ Enhance <span class="hotkey">E</span>
+        </button>
+        <button class="btn" id="btn-set-ref" title="Set current frame as background reference  [R]" onclick="setRefFrame()">
+          📌 Set Ref <span class="hotkey">R</span>
+        </button>
+        <div id="calibration-status" style="font-size:11px;color:#58a6ff;margin-top:4px"></div>
+        <div id="droplet-status" style="font-size:11px;color:#58a6ff;margin-top:4px"></div>
+      </div>
+
+      <label>Selected Crystal:</label>
+      <div id="selected-crystal-display" style="font-size:13px;font-weight:600;padding:4px 8px;
+                                                background:#21262d;border-radius:4px;
+                                                min-height:20px;margin-bottom:8px">
+        (None selected)
+      </div>
+      <div class="btn-row measure-btns">
+        <button class="btn" id="btn-h" title="Horizontal measurement  [H]">
+          ↔ Horiz <span class="hotkey">H</span>
+        </button>
+        <button class="btn" id="btn-v" title="Vertical measurement  [V]">
+          ↕ Vert <span class="hotkey">V</span>
+        </button>
+        <button class="btn" id="btn-cancel" title="Cancel current measurement  [Esc]">
+          ✕ Cancel
+        </button>
+      </div>
+      <div style="margin-top:8px;padding:6px 8px;border-radius:4px;background:#21262d;
+                  font-size:11px;color:#6e7681">
+        Mark nucleation: <span class="hotkey">N</span>
+      </div>
+    </div>
+
+      <h3>Dashboard
+        <button class="btn" id="btn-export-excel" title="Export metrics to Excel" style="float:right;font-size:11px;padding:4px 8px">
+          📊 Excel
+        </button>
+        <button class="btn" id="btn-export-dataset" title="Export crops + COCO JSON to dataset/ folder" style="float:right;font-size:11px;padding:4px 8px;margin-right:4px" onclick="exportDataset()">
+          💾 Export Dataset
+        </button>
+      </h3>
+      <div id="dashboard"></div>
+
+    <h3>Growth Curves</h3>
+    <div id="chart-section">
+      <div id="chart-wrap">
+        <canvas id="growth-chart"></canvas>
+      </div>
+    </div>
+
+    <h3 id="meas-heading">Measurements (this frame)</h3>
+    <div id="measurements"></div>
+  </div>
+
+</div>
+
+<!-- ═══ BOTTOM BAR ════════════════════════════════════════════════════════ -->
+<div id="bottombar">
+  <span>Shortcuts: <span class="hotkey">←</span><span class="hotkey">→</span> navigate
+    &nbsp; <span class="hotkey">N</span> nucleation
+    &nbsp; <span class="hotkey">H</span> horiz
+    &nbsp; <span class="hotkey">V</span> vert
+    &nbsp; <span class="hotkey">A</span> auto crop
+    &nbsp; <span class="hotkey">E</span> enhance
+    &nbsp; <span class="hotkey">R</span> set ref
+    &nbsp; <span class="hotkey">Esc</span> cancel</span>
+  <span id="autosave-indicator">●&nbsp;autosaved</span>
+</div>
+
+<!-- ═══ JAVASCRIPT ════════════════════════════════════════════════════════ -->
+<script>
+// ─── state ──────────────────────────────────────────────────────────────────
+let expName      = "";
+let frames       = [];           // array of {frame_idx, filename, timestamp_iso, t_sec, t_min}
+let currentIdx   = 0;
+let crystals     = [];           // array of {id, nucleation_frame_idx, nucleation_timestamp_iso, notes}
+let selectedCrystalId = null;    // currently selected crystal ID
+let allLengths   = [];           // all measurements for this experiment
+let calibration  = {};           // {pixels_per_mm, tube_width_px} if calibrated
+let dropletInfo  = {};           // {height_um, volume_ul} if droplet measured
+
+// measurement mode
+let mode  = null;               // null | "h" | "v" | "tube" | "droplet"
+let click1 = null;              // {x, y} canvas coords of first click (or null)
+
+// auto-crop state
+let cropRegion   = null;        // null = full image | {x, y, w, h} in image coords
+let enhancedMode = false;       // true = showing temporally-enhanced image
+let enhancedImg  = null;        // enhanced Image object (tied to current frame + crop)
+let refFrameIdx  = 0;           // which frame index is the background reference
+
+// image & canvas
+const cv  = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let   img = new Image();
+let   imgScale = 1;              // canvas pixels / image pixels
+let   imgOffX = 0, imgOffY = 0;
+
+// ─── DOM refs ───────────────────────────────────────────────────────────────
+const $exp              = document.getElementById("exp-select");
+const $navLabel         = document.getElementById("nav-label");
+const $frameInfo        = document.getElementById("frame-info");
+const $measHint         = document.getElementById("measure-hint");
+const $bestDisplay      = document.getElementById("selected-crystal-display");
+const $measList         = document.getElementById("measurements");
+const $measHead         = document.getElementById("meas-heading");
+const $crystalsList     = document.getElementById("crystals-list");
+const $btnH             = document.getElementById("btn-h");
+const $btnV             = document.getElementById("btn-v");
+const $autosave         = document.getElementById("autosave-indicator");
+const $calStatus        = document.getElementById("calibration-status");
+
+// ─── init ───────────────────────────────────────────────────────────────────
+(async function init(){
+  const exps = await api("/api/experiments");
+  $exp.innerHTML = '<option value="">— select experiment —</option>' +
+    exps.map(e=>`<option value="${e}">${e}</option>`).join("");
+  // restore last selection
+  const last = localStorage.getItem("lastExp");
+  if(last && exps.includes(last)){$exp.value=last; loadExperiment(last);}
+})();
+
+$exp.addEventListener("change",()=>{
+  if($exp.value){ localStorage.setItem("lastExp",$exp.value); loadExperiment($exp.value); }
+});
+
+// ─── load experiment ────────────────────────────────────────────────────────
+async function loadExperiment(name){
+  expName = name;
+  cropRegion   = null;
+  enhancedMode = false;
+  enhancedImg  = null;
+  refFrameIdx  = 0;
+  frames  = await api(`/api/frames/${name}`);
+  if(!frames.length){alert("No valid images found in "+name);return;}
+  crystals  = await api(`/api/crystals/${name}`);
+  allLengths = await api(`/api/lengths/${name}`);
+  calibration = await api(`/api/calibration/${name}`) || {};
+  dropletInfo = await api(`/api/droplet/${name}`) || {};
+  currentIdx = 0;
+  selectedCrystalId = crystals.length > 0 ? crystals[0].id : null;
+  showFrame(0);
+  renderCrystals();
+  renderCalibrationStatus();
+  renderDropletStatus();
+  renderDashboard();
+  renderGrowthChart();
+}
+
+// ─── frame display ──────────────────────────────────────────────────────────
+function showFrame(idx){
+  if(idx<0||idx>=frames.length) return;
+  currentIdx = idx;
+  cancelMeasurement();
+  enhancedMode = false;
+  enhancedImg  = null;
+  const $btnE = document.getElementById("btn-enhance");
+  if($btnE){ $btnE.classList.remove("active"); $btnE.innerHTML='✨ Enhance <span class="hotkey">E</span>'; }
+  const f = frames[idx];
+  img = new Image();
+  img.onload = () => drawCanvas();
+  img.src = `/api/image/${expName}/${f.filename}`;
+  $navLabel.textContent = `Frame ${idx+1} / ${frames.length}`;
+  const refMark = (idx === refFrameIdx) ? "  📌 REF" : "";
+  $frameInfo.textContent =
+    `#${idx}  ${f.filename}  t=${f.t_min} min  (${f.timestamp_iso})${refMark}`;
+  renderMeasurements();
+}
+
+function drawCanvas(){
+  const panel = document.getElementById("canvas-panel");
+  const pw = panel.clientWidth, ph = panel.clientHeight;
+  const srcX = cropRegion ? cropRegion.x : 0;
+  const srcY = cropRegion ? cropRegion.y : 0;
+  const srcW = cropRegion ? cropRegion.w : img.naturalWidth;
+  const srcH = cropRegion ? cropRegion.h : img.naturalHeight;
+  const scale = Math.min(pw/srcW, ph/srcH, 1);
+  const cw = Math.round(srcW*scale), ch = Math.round(srcH*scale);
+  cv.width = cw; cv.height = ch;
+  imgScale = scale; imgOffX = srcX; imgOffY = srcY;
+  if(enhancedMode && enhancedImg){
+    ctx.drawImage(enhancedImg, 0, 0, enhancedImg.naturalWidth, enhancedImg.naturalHeight, 0, 0, cw, ch);
+  } else {
+    ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, cw, ch);
+  }
+  drawOverlays();
+}
+window.addEventListener("resize", ()=>{if(img.complete && img.naturalWidth) drawCanvas();});
+
+function drawOverlays(){
+  // draw measurements for this frame
+  const frameMeas = allLengths.filter(m=>m.frame_idx===currentIdx);
+  const colorMap = {};
+  for(const crystal of crystals){
+    // assign a color to each crystal based on index
+    const hue = (crystals.indexOf(crystal) * 60) % 360;
+    colorMap[crystal.id] = `hsl(${hue},70%,55%)`;
+  }
+
+  for(const m of frameMeas){
+    const p1 = toCanvas(m.p1);
+    const p2 = toCanvas(m.p2);
+    const color = colorMap[m.crystal_id] || "#9370db";
+    drawLine(p1, p2, color);
+    drawDot(p1, color); drawDot(p2, color);
+    // label
+    const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+    ctx.font = "bold 12px monospace";
+    ctx.fillStyle = color;
+    const label = m.direction==="h"
+      ? `${m.crystal_id} h=${m.h_px}px`
+      : `${m.crystal_id} v=${m.v_px}px`;
+    ctx.fillText(label, mx+6, my-6);
+  }
+
+  // draw nucleation markers
+  for(const crystal of crystals){
+    if(crystal.nucleation_frame_idx !== null && crystal.nucleation_frame_idx === currentIdx){
+      ctx.font = "bold 14px monospace";
+      ctx.fillStyle = "#ffa657";
+      ctx.fillText("⚪ nucleation", 10, 30);
+      break;
+    }
+  }
+
+  // draw pending click1
+  if(click1){
+    drawDot(click1, "#ffa657");
+  }
+
+  // crop / enhance mode badge
+  if(cropRegion || enhancedMode){
+    ctx.font = "bold 12px monospace";
+    const label = (cropRegion && enhancedMode)
+      ? "🔍✨ Cropped+Enhanced — A/E to exit"
+      : cropRegion
+        ? "🔍 Cropped view — press A to exit"
+        : "✨ Enhanced — press E to exit";
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(cv.width - tw - 20, 6, tw + 14, 22);
+    ctx.fillStyle = enhancedMode ? "#ffa657" : "#58a6ff";
+    ctx.fillText(label, cv.width - tw - 13, 22);
+  }
+}
+
+function drawLine(a,b,color){
+  ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.stroke();ctx.setLineDash([]);
+}
+function drawDot(p,color){
+  ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+  ctx.strokeStyle="#000";ctx.lineWidth=1;ctx.stroke();
+}
+
+// coordinate conversion: image px ↔ canvas px (accounts for crop offset)
+function toImage(canvasPt){return{x:canvasPt.x/imgScale+imgOffX, y:canvasPt.y/imgScale+imgOffY};}
+function toCanvas(imgPt){return{x:(imgPt.x-imgOffX)*imgScale, y:(imgPt.y-imgOffY)*imgScale};}
+
+// ─── canvas click ───────────────────────────────────────────────────────────
+cv.addEventListener("click", async e=>{
+  if(!mode) return;
+  // tube calibration and droplet measurement don't need selectedCrystalId
+  if(mode !== "tube" && mode !== "droplet" && !selectedCrystalId) return;
+
+  const rect = cv.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const imgPt = toImage({x:cx, y:cy});
+
+  if(!click1){
+    // first click
+    click1 = {x:cx, y:cy};
+    if(mode === "tube"){
+      $measHint.textContent = "Click the RIGHT end of the tube…";
+    } else if(mode === "droplet"){
+      $measHint.textContent = "Click the TOP of the droplet…";
+    } else {
+      $measHint.textContent = mode==="h"
+        ? "Click the RIGHT end of the crystal…"
+        : "Click the TOP end of the crystal…";
+    }
+    drawCanvas();
+    return;
+  }
+
+  // second click → save measurement
+  const imgPt1 = toImage(click1);
+  const imgPt2 = toImage({x:cx, y:cy});
+  const f = frames[currentIdx];
+
+  const meas = {
+    frame_idx:     currentIdx,
+    filename:      f.filename,
+    timestamp_iso: f.timestamp_iso,
+    t_min:         f.t_min,
+    crystal_id:    mode === "tube" ? "__TUBE_WIDTH__" : (mode === "droplet" ? "__DROPLET_HEIGHT__" : selectedCrystalId),
+    direction:     mode === "tube" ? "h" : (mode === "droplet" ? "v" : mode),
+    p1:            {x:Math.round(imgPt1.x), y:Math.round(imgPt1.y)},
+    p2:            {x:Math.round(imgPt2.x), y:Math.round(imgPt2.y)},
+    h_px:          (mode==="h" || mode==="tube") ? Math.round(Math.abs(imgPt2.x - imgPt1.x)) : null,
+    v_px:          (mode==="v" || mode==="droplet") ? Math.round(Math.abs(imgPt2.y - imgPt1.y)) : null,
+    saved_at:      new Date().toISOString(),
+  };
+
+  allLengths.push(meas);
+  apiPost(`/api/lengths/${expName}`, meas);
+  flashSave();
+
+  // If tube calibration, reload calibration data
+  if(mode === "tube"){
+    calibration = await api(`/api/calibration/${expName}`) || {};
+    renderCalibrationStatus();
+    // Reload all measurements to get µm conversions
+    allLengths = await api(`/api/lengths/${expName}`);
+  }
+
+  // If droplet measurement, reload droplet data
+  if(mode === "droplet"){
+    dropletInfo = await api(`/api/droplet/${expName}`) || {};
+    renderDropletStatus();
+    // Reload all measurements
+    allLengths = await api(`/api/lengths/${expName}`);
+  }
+
+  cancelMeasurement();
+  drawCanvas();
+  renderMeasurements();
+});
+
+// ─── measurement mode controls ──────────────────────────────────────────────
+function startMode(m){
+  if(m !== "tube" && !selectedCrystalId){alert("Please select a crystal first.");return;}
+  cancelMeasurement();
+  mode = m;
+  $btnH.classList.toggle("active", m==="h");
+  $btnV.classList.toggle("active", m==="v");
+  $measHint.style.display = "block";
+  if(m === "tube"){
+    $measHint.textContent = "Click the LEFT end of the tube…";
+  } else if(m === "droplet"){
+    $measHint.textContent = "Click the BOTTOM of the droplet…";
+  } else {
+    $measHint.textContent = m==="h"
+      ? "Click the LEFT end of the crystal…"
+      : "Click the BOTTOM end of the crystal…";
+  }
+}
+function cancelMeasurement(){
+  mode = null; click1 = null;
+  $btnH.classList.remove("active");
+  $btnV.classList.remove("active");
+  $measHint.style.display = "none";
+  if(img.complete && img.naturalWidth) drawCanvas();
+}
+
+async function autoDetectDroplet(){
+  if(!expName || !frames.length) return;
+  const $btn = document.getElementById("btn-auto-crop");
+  if(cropRegion){
+    cropRegion   = null;
+    enhancedMode = false;
+    enhancedImg  = null;
+    $btn.classList.remove("active");
+    $btn.innerHTML = '🔍 Auto Crop <span class="hotkey">A</span>';
+    const $btnE = document.getElementById("btn-enhance");
+    if($btnE){ $btnE.classList.remove("active"); $btnE.innerHTML='✨ Enhance <span class="hotkey">E</span>'; }
+    drawCanvas();
+    return;
+  }
+  const origHTML = $btn.innerHTML;
+  $btn.textContent = "⏳ Detecting…";
+  $btn.disabled = true;
+  try {
+    const res = await api(`/api/detect_droplet/${expName}/${frames[currentIdx].filename}`);
+    if(res.error){ alert("Auto-detect failed: " + res.error); return; }
+    cropRegion = res;
+    $btn.classList.add("active");
+    drawCanvas();
+  } catch(e){
+    alert("Auto-detect error: " + e);
+  } finally {
+    $btn.innerHTML = origHTML;
+    $btn.disabled = false;
+  }
+}
+
+async function toggleEnhanced(){
+  if(!expName || !frames.length) return;
+  const $btn = document.getElementById("btn-enhance");
+  if(enhancedMode){
+    enhancedMode = false;
+    enhancedImg  = null;
+    $btn.classList.remove("active");
+    $btn.innerHTML = '✨ Enhance <span class="hotkey">E</span>';
+    drawCanvas();
+    return;
+  }
+  // Ensure we have a crop region; auto-detect if not
+  if(!cropRegion){
+    await autoDetectDroplet();
+    if(!cropRegion) return;
+  }
+  const f = frames[currentIdx];
+  const origHTML = $btn.innerHTML;
+  $btn.textContent = "⏳ Enhancing…";
+  $btn.disabled = true;
+  try {
+    const refFilename = frames[refFrameIdx] ? frames[refFrameIdx].filename : frames[0].filename;
+    const url = `/api/enhanced_crop/${expName}/${f.filename}?x=${cropRegion.x}&y=${cropRegion.y}&w=${cropRegion.w}&h=${cropRegion.h}&ref=${encodeURIComponent(refFilename)}`;
+    const eImg = new Image();
+    await new Promise((resolve, reject) => { eImg.onload = resolve; eImg.onerror = reject; eImg.src = url; });
+    enhancedImg  = eImg;
+    enhancedMode = true;
+    $btn.classList.add("active");
+    drawCanvas();
+  } catch(err){
+    alert("Enhancement failed: " + err);
+  } finally {
+    $btn.innerHTML = origHTML;
+    $btn.disabled  = false;
+  }
+}
+
+function setRefFrame(){
+  if(!frames.length) return;
+  refFrameIdx  = currentIdx;
+  enhancedMode = false;
+  enhancedImg  = null;
+  const $btnE = document.getElementById("btn-enhance");
+  if($btnE){ $btnE.classList.remove("active"); $btnE.innerHTML='✨ Enhance <span class="hotkey">E</span>'; }
+  showFrame(currentIdx);  // re-render to show REF badge
+}
+
+document.getElementById("btn-h").addEventListener("click",()=>startMode("h"));
+document.getElementById("btn-v").addEventListener("click",()=>startMode("v"));
+document.getElementById("btn-cancel").addEventListener("click",cancelMeasurement);
+document.getElementById("btn-calibrate-tube").addEventListener("click",()=>startMode("tube"));
+document.getElementById("btn-measure-droplet").addEventListener("click",()=>startMode("droplet"));
+
+// ─── calibration ────────────────────────────────────────────────────────────
+function renderCalibrationStatus(){
+  if(!calibration.pixels_per_mm){
+    $calStatus.textContent = "Not calibrated";
+    $calStatus.style.color = "#8b949e";
+  } else {
+    $calStatus.textContent = `✓ ${calibration.tube_width_px}px = 1.5mm (${calibration.pixels_per_mm.toFixed(2)}px/mm)`;
+    $calStatus.style.color = "#58a6ff";
+  }
+}
+
+function renderDropletStatus(){
+  const el = document.getElementById("droplet-status");
+  if(!dropletInfo.volume_ul){
+    el.textContent = "💧 No droplet measurement";
+    el.style.color = "#8b949e";
+  } else {
+    el.textContent = `💧 Droplet: ${dropletInfo.height_um}µm → ${dropletInfo.volume_ul}µL (ø ${dropletInfo.droplet_diameter_mm}mm)`;
+    el.style.color = "#58a6ff";
+  }
+}
+
+function frameTimeHr(idx){
+  return frames[idx] ? (frames[idx].t_min / 60) : null;
+}
+
+function linearSlope(points){
+  let n = 0;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXX = 0;
+  let sumXY = 0;
+  for(const p of points){
+    if(p.t === null || p.v === null) continue;
+    n += 1;
+    sumX += p.t;
+    sumY += p.v;
+    sumXX += p.t * p.t;
+    sumXY += p.t * p.v;
+  }
+  if(n < 2) return null;
+  const denom = (n * sumXX) - (sumX * sumX);
+  if(denom === 0) return null;
+  return (n * sumXY - sumX * sumY) / denom;
+}
+
+function latestValue(meas, key){
+  let best = null;
+  for(const m of meas){
+    if(m[key] === null || m[key] === undefined) continue;
+    const t = frameTimeHr(m.frame_idx);
+    if(t === null) continue;
+    if(!best || t > best.t) best = {t, v: m[key]};
+  }
+  return best ? best.v : null;
+}
+
+function fmt(v, digits=2){
+  if(v === null || v === undefined || Number.isNaN(v)) return "—";
+  return Number(v).toFixed(digits);
+}
+
+function renderDashboard(){
+  const el = document.getElementById("dashboard");
+  if(!frames.length){
+    el.innerHTML = "";
+    return;
+  }
+
+  const totalTimeHr = (frames[frames.length - 1].t_min || 0) / 60;
+  const nucCrystals = crystals.filter(c=>c.nucleation_frame_idx !== null);
+  const nucCount = nucCrystals.length;
+  const volumeUl = dropletInfo.volume_ul || null;
+  const nucRate = (totalTimeHr > 0 && volumeUl)
+    ? (nucCount / (totalTimeHr * volumeUl))
+    : null;
+
+  const useUm = Boolean(calibration.pixels_per_mm);
+  const unit = useUm ? "µm" : "px";
+  const unitArea = useUm ? "µm²" : "px²";
+  const unitRate = useUm ? "µm/hr" : "px/hr";
+
+  const inductionHtml = crystals.map(c=>{
+    if(c.nucleation_frame_idx === null){
+      return `<div class="dash-muted">${c.id}: not marked</div>`;
+    }
+    const t = frameTimeHr(c.nucleation_frame_idx);
+    if(t === null){
+      return `<div class="dash-muted">${c.id}: n/a</div>`;
+    }
+    return `<div>${c.id}: ${fmt(t, 3)} hr</div>`;
+  }).join("");
+
+  const rows = crystals.map(c=>{
+    const meas = allLengths.filter(m=>m.crystal_id === c.id);
+    const hPoints = meas
+      .filter(m=>useUm ? m.h_um !== undefined && m.h_um !== null : m.h_px !== undefined && m.h_px !== null)
+      .map(m=>({t: frameTimeHr(m.frame_idx), v: useUm ? m.h_um : m.h_px}))
+      .filter(p=>p.t !== null && p.v !== null);
+    const vPoints = meas
+      .filter(m=>useUm ? m.v_um !== undefined && m.v_um !== null : m.v_px !== undefined && m.v_px !== null)
+      .map(m=>({t: frameTimeHr(m.frame_idx), v: useUm ? m.v_um : m.v_px}))
+      .filter(p=>p.t !== null && p.v !== null);
+
+    const hSlope = linearSlope(hPoints);
+    const vSlope = linearSlope(vPoints);
+    const hLatest = latestValue(meas, useUm ? "h_um" : "h_px");
+    const vLatest = latestValue(meas, useUm ? "v_um" : "v_px");
+    let area = null;
+    let ratio = null;
+    if(hLatest !== null && vLatest !== null){
+      area = Math.PI * (hLatest / 2) * (vLatest / 2);
+      ratio = hLatest / vLatest;
+    }
+
+    return `<tr>
+      <td>${c.id}</td>
+      <td>${fmt(hLatest)} ${unit}</td>
+      <td>${fmt(vLatest)} ${unit}</td>
+      <td>${fmt(hSlope)} ${unitRate}</td>
+      <td>${fmt(vSlope)} ${unitRate}</td>
+      <td>${fmt(area)} ${unitArea}</td>
+      <td>${fmt(ratio)}</td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="dash-grid">
+      <div class="dash-card">
+        <div class="dash-title">Experiment</div>
+        <div class="dash-row"><span>Total time</span><span>${fmt(totalTimeHr, 3)} hr</span></div>
+        <div class="dash-row"><span>Nucleation events</span><span>${nucCount}</span></div>
+        <div class="dash-row"><span>Droplet volume</span><span>${volumeUl ? fmt(volumeUl, 3) + " µL" : "—"}</span></div>
+        <div class="dash-row"><span>Nucleation rate</span><span>${nucRate ? fmt(nucRate, 6) + " events/hr/µL" : "—"}</span></div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-title">Induction Time (per crystal)</div>
+        ${inductionHtml || "<div class=\"dash-muted\">No crystals</div>"}
+      </div>
+    </div>
+    <div class="dash-card" style="margin-top:8px">
+      <div class="dash-title">Growth + Shape (per crystal)</div>
+      <table class="dash-table">
+        <thead>
+          <tr>
+            <th>Crystal</th>
+            <th>H size</th>
+            <th>V size</th>
+            <th>H rate</th>
+            <th>V rate</th>
+            <th>Area</th>
+            <th>Aspect</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || `<tr><td colspan="7" class="dash-muted">No measurements</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ─── growth chart ────────────────────────────────────────────────────────────
+let growthChart = null;
+
+function crystalColor(idx, alpha=1){
+  const hue = (idx * 60) % 360;
+  return `hsla(${hue},70%,55%,${alpha})`;
+}
+
+function renderGrowthChart(){
+  const useUm = Boolean(calibration.pixels_per_mm);
+  const unit  = useUm ? "µm" : "px";
+  const hKey  = useUm ? "h_um" : "h_px";
+  const vKey  = useUm ? "v_um" : "v_px";
+
+  const datasets = [];
+
+  crystals.forEach((crystal, ci) => {
+    const meas = allLengths.filter(m => m.crystal_id === crystal.id);
+
+    // H points
+    const hPts = meas
+      .filter(m => m[hKey] != null && frames[m.frame_idx])
+      .map(m => ({ x: frames[m.frame_idx].t_min / 60, y: m[hKey] }))
+      .sort((a, b) => a.x - b.x);
+
+    // V points
+    const vPts = meas
+      .filter(m => m[vKey] != null && frames[m.frame_idx])
+      .map(m => ({ x: frames[m.frame_idx].t_min / 60, y: m[vKey] }))
+      .sort((a, b) => a.x - b.x);
+
+    if(hPts.length){
+      datasets.push({
+        label: `${crystal.id} H`,
+        data: hPts,
+        borderColor: crystalColor(ci),
+        backgroundColor: crystalColor(ci, 0.15),
+        borderWidth: 2,
+        pointRadius: 4,
+        tension: 0.2,
+        fill: false,
+      });
+    }
+    if(vPts.length){
+      datasets.push({
+        label: `${crystal.id} V`,
+        data: vPts,
+        borderColor: crystalColor(ci, 0.6),
+        backgroundColor: crystalColor(ci, 0.08),
+        borderWidth: 2,
+        borderDash: [5, 3],
+        pointRadius: 4,
+        tension: 0.2,
+        fill: false,
+      });
+    }
+  });
+
+  const cfg = {
+    type: "line",
+    data: { datasets },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: { color: "#8b949e", font: { size: 10 }, boxWidth: 14 },
+          position: "top",
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} ${unit}`,
+            title: ctx => `t = ${ctx[0].parsed.x.toFixed(3)} hr`,
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: "linear",
+          title: { display: true, text: "Time (hr)", color: "#8b949e", font: { size: 10 } },
+          ticks: { color: "#6e7681", font: { size: 10 } },
+          grid:  { color: "#21262d" },
+        },
+        y: {
+          title: { display: true, text: `Size (${unit})`, color: "#8b949e", font: { size: 10 } },
+          ticks: { color: "#6e7681", font: { size: 10 } },
+          grid:  { color: "#21262d" },
+        }
+      }
+    }
+  };
+
+  if(growthChart){
+    growthChart.data.datasets = datasets;
+    growthChart.options.scales.y.title.text = `Size (${unit})`;
+    growthChart.update();
+  } else {
+    const canvas = document.getElementById("growth-chart");
+    growthChart = new Chart(canvas, cfg);
+  }
+}
+
+// ─── crystals management ────────────────────────────────────────────────────
+async function createCrystal(){
+  const crystal = await apiPost(`/api/crystals/${expName}`, {notes:""});
+  crystals.push(await crystal.json());
+  selectedCrystalId = crystals[crystals.length-1].id;
+  renderCrystals();
+  flashSave();
+}
+
+async function deleteCrystal(crystalId){
+  if(crystals.length<=1){alert("Cannot delete the last crystal.");return;}
+  if(!confirm("Delete this crystal and all its measurements?")){return;}
+  await api(`/api/crystals/${expName}/${crystalId}`, {method:"DELETE"});
+  crystals = crystals.filter(c=>c.id!==crystalId);
+  if(selectedCrystalId===crystalId){
+    selectedCrystalId = crystals.length>0 ? crystals[0].id : null;
+  }
+  allLengths = allLengths.filter(m=>m.crystal_id!==crystalId);
+  renderCrystals();
+  renderMeasurements();
+  flashSave();
+}
+
+function selectCrystal(crystalId){
+  selectedCrystalId = crystalId;
+  renderCrystals();
+  cancelMeasurement();
+  drawCanvas();
+  renderMeasurements();
+}
+
+function renderCrystals(){
+  if(!crystals.length){
+    $crystalsList.innerHTML = '<div style="padding:8px;color:#6e7681;font-size:12px">'+
+      'Click "New Crystal" to start.</div>';
+    $bestDisplay.textContent = "(None selected)";
+    selectedCrystalId = null;
+    return;
+  }
+
+  $crystalsList.innerHTML = crystals.map(c=>{
+    const isSelected = c.id===selectedCrystalId;
+    const nucText = c.nucleation_frame_idx !== null
+      ? `Frame ${c.nucleation_frame_idx}`
+      : "Not marked";
+    return `<div class="crystal-item ${isSelected?'selected':''}">
+      <div onclick="selectCrystal('${c.id}')">
+        <div class="name">${c.id}</div>
+        <div class="nuc-indicator">Nucleation: ${nucText}</div>
+      </div>
+      <span class="delete-btn" onclick="deleteCrystal('${c.id}')" title="Delete">✕</span>
+    </div>`;
+  }).join("");
+
+  if(selectedCrystalId){
+    const sel = crystals.find(c=>c.id===selectedCrystalId);
+    const nucText = sel.nucleation_frame_idx !== null
+      ? `Nucleation at frame ${sel.nucleation_frame_idx}`
+      : "Nucleation not marked";
+    $bestDisplay.textContent = `${sel.id}  —  ${nucText}`;
+  }
+}
+
+document.getElementById("btn-new-crystal").addEventListener("click", createCrystal);
+
+async function exportDataset(){
+  if(!expName){ alert("No experiment loaded"); return; }
+  const $btn = document.getElementById("btn-export-dataset");
+  const origHTML = $btn.innerHTML;
+  $btn.textContent = "⏳ Exporting…";
+  $btn.disabled = true;
+  try {
+    const res  = await fetch(`/api/export/${expName}/dataset`, {method:"POST"});
+    const data = await res.json();
+    if(data.error){ alert("Export failed: " + data.error); return; }
+    const errMsg = data.errors.length ? `\n⚠ ${data.errors.length} frame(s) skipped.` : "";
+    alert(`✓ Dataset exported!\n${data.processed} frames processed.${errMsg}\n\nSaved inside experiment folder:\n  dataset/crops/\n  dataset/enhanced/\n  dataset/coco_droplets.json\n  dataset/coco_crystals.json`);
+  } catch(e){
+    alert("Export error: " + e);
+  } finally {
+    $btn.innerHTML = origHTML;
+    $btn.disabled  = false;
+  }
+}
+
+document.getElementById("btn-export-excel").addEventListener("click", async ()=>{
+  if(!expName){alert("No experiment loaded");return;}
+  const url = `/api/export/${expName}/metrics`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${expName}_metrics.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+});
+
+// ─── nucleation ─────────────────────────────────────────────────────────────
+async function markNucleation(){
+  if(!selectedCrystalId){alert("Please select a crystal first.");return;}
+  if(!frames.length) return;
+  const f = frames[currentIdx];
+  const crystal = crystals.find(c=>c.id===selectedCrystalId);
+  if(!crystal) return;
+
+  crystal.nucleation_frame_idx = currentIdx;
+  crystal.nucleation_timestamp_iso = f.timestamp_iso;
+
+  await apiPut(`/api/crystals/${expName}/${selectedCrystalId}/nucleation`, {
+    nucleation_frame_idx: currentIdx,
+    nucleation_timestamp_iso: f.timestamp_iso,
+  });
+  flashSave();
+  renderCrystals();
+  renderDashboard();
+  renderGrowthChart();
+  drawCanvas();
+}
+
+document.addEventListener("keydown", e=>{
+  if(e.target.tagName==="INPUT" || e.target.tagName==="SELECT") return;
+  if(e.key==="n" || e.key==="N"){
+    e.preventDefault();
+    markNucleation();
+  }
+});
+
+// ─── measurements list (sidebar) ────────────────────────────────────────────
+function renderMeasurements(){
+  let frameMeas = allLengths
+    .map((m,i)=>({...m, _idx:i}))
+    .filter(m=>m.frame_idx===currentIdx);
+
+  if(selectedCrystalId){
+    frameMeas = frameMeas.filter(m=>m.crystal_id===selectedCrystalId);
+  }
+
+  $measHead.textContent = `Measurements — frame ${currentIdx} (${frameMeas.length})`;
+  if(!frameMeas.length){
+    $measList.innerHTML = '<div style="padding:8px 0;color:#6e7681;font-size:12px">None yet.</div>';
+    renderDashboard();
+    renderGrowthChart();
+    return;
+  }
+  $measList.innerHTML = frameMeas.map(m=>{
+    let val = m.direction==="h" ? `↔ ${m.h_px} px` : `↕ ${m.v_px} px`;
+    // Add µm if calibrated
+    if(calibration.pixels_per_mm){
+      const um = m.direction==="h" ? m.h_um : m.v_um;
+      if(um) val += ` = ${um} µm`;
+    }
+    return `<div class="meas-item ${selectedCrystalId && m.crystal_id!==selectedCrystalId?'':'for-crystal'}">
+      <div class="info">
+        <span class="val">${m.crystal_id}  ${val}</span>
+        <span class="meta">(${m.p1.x},${m.p1.y}) → (${m.p2.x},${m.p2.y})</span>
+      </div>
+      <span class="del" onclick="deleteMeas(${m._idx},'${m.crystal_id}')" title="Delete">✕</span>
+    </div>`;
+  }).join("");
+  renderDashboard();
+  renderGrowthChart();
+}
+
+async function deleteMeas(globalIdx, crystalId){
+  allLengths.splice(globalIdx, 1);
+  await api(`/api/lengths/${expName}/${crystalId}/${
+    allLengths.filter(m=>m.crystal_id===crystalId).length}`, {method:"DELETE"});
+  flashSave();
+  drawCanvas();
+  renderMeasurements();
+}
+
+// ─── navigation ─────────────────────────────────────────────────────────────
+document.getElementById("btn-prev").addEventListener("click",()=>showFrame(currentIdx-1));
+document.getElementById("btn-next").addEventListener("click",()=>showFrame(currentIdx+1));
+
+// ─── keyboard shortcuts ─────────────────────────────────────────────────────
+document.addEventListener("keydown", e=>{
+  // ignore when typing in an input
+  if(e.target.tagName==="INPUT" || e.target.tagName==="SELECT") return;
+
+  switch(e.key){
+    case "ArrowLeft":  e.preventDefault(); showFrame(currentIdx-1); break;
+    case "ArrowRight": e.preventDefault(); showFrame(currentIdx+1); break;
+    case "h": case "H": e.preventDefault(); startMode("h"); break;
+    case "v": case "V": e.preventDefault(); startMode("v"); break;
+    case "t": case "T": e.preventDefault(); startMode("tube"); break;
+    case "d": case "D": e.preventDefault(); startMode("droplet"); break;
+    case "a": case "A": e.preventDefault(); autoDetectDroplet(); break;
+    case "e": case "E": e.preventDefault(); toggleEnhanced(); break;
+    case "r": case "R": e.preventDefault(); setRefFrame(); break;
+    case "Escape":     e.preventDefault(); cancelMeasurement(); break;
+  }
+});
+
+// ─── fetch helpers ──────────────────────────────────────────────────────────
+async function api(url, opts={}){
+  const r = await fetch(url, opts);
+  return r.json();
+}
+async function apiPost(url, body){
+  return fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify(body)});
+}
+async function apiPut(url, body){
+  return fetch(url,{method:"PUT",headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify(body)});
+}
+
+// ─── autosave indicator ─────────────────────────────────────────────────────
+function flashSave(){
+  $autosave.style.color="#3fb950";
+  $autosave.textContent="● saved";
+  setTimeout(()=>{$autosave.style.color="#6e7681";$autosave.textContent="● autosaved";},1500);
+}
+</script>
+</body>
+</html>

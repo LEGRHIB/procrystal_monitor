@@ -24,6 +24,11 @@ wheels/
 venv/
 ENV/
 env/
+.venv/
+annotator/.venv/
+
+# Trained models (large binaries — train locally with train.py)
+models/*.pth
 
 # IDE
 .vscode/

@@ -35,6 +35,21 @@ from multi_droplet import MultiDropletManager
 from dashboard import CrystalDashboard
 from deep_learning import LabelGenerator
 
+# ─── U-Net model (optional — loaded if models/crystal_unet.pth exists) ────────
+_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "crystal_unet.pth")
+
+
+def _load_unet():
+    """Load the trained U-Net if available; return None otherwise."""
+    from deep_learning import TORCH_AVAILABLE, UNet
+    if not TORCH_AVAILABLE or not os.path.exists(_MODEL_PATH):
+        return None
+    import torch
+    model = UNet(in_channels=1, num_classes=3)
+    model.load_state_dict(torch.load(_MODEL_PATH, map_location="cpu"))
+    print(f"  U-Net model loaded from {_MODEL_PATH}")
+    return model
+
 
 class SingleDropletPipeline:
     """
@@ -61,6 +76,7 @@ class SingleDropletPipeline:
         self.crystal_detector = CrystalDetector(config)
         self.tracker = GrowthTracker(config)
         self.dashboard = None
+        self._unet = _load_unet()
 
         # Storage
         self.reference_image: Optional[np.ndarray] = None
@@ -122,8 +138,11 @@ class SingleDropletPipeline:
                 ref_resized = self.reference_roi
             ref_diff = self.preprocessor.subtract_reference(preprocessed, ref_resized)
 
-        # Detect crystals
-        detections = self.crystal_detector.detect(preprocessed, ref_diff)
+        # Detect crystals — use U-Net if available, else classical CV
+        if self._unet is not None:
+            detections = self._detect_with_unet(preprocessed)
+        else:
+            detections = self.crystal_detector.detect(preprocessed, ref_diff)
 
         # Update tracker
         self.tracker.update(frame_index, timestamp, detections)
@@ -267,6 +286,36 @@ class SingleDropletPipeline:
 
         if verbose:
             print(f"\n  All results exported to: {output_dir}")
+
+    def _detect_with_unet(self, roi: np.ndarray) -> List[CrystalDetection]:
+        """Run U-Net inference and convert the segmentation mask to CrystalDetection objects."""
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi
+        pred = self._unet.predict(gray)   # (H, W) with values 0/1/2
+
+        detections = []
+        for class_idx, is_nuc in ((1, True), (2, False)):
+            mask = (pred == class_idx).astype(np.uint8) * 255
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                area = float(cv2.contourArea(cnt))
+                if area < self.config.detection.min_crystal_area_px:
+                    continue
+                x, y, w, h = cv2.boundingRect(cnt)
+                cx, cy = x + w / 2, y + h / 2
+                sub = gray[y:y+h, x:x+w]
+                mean_i = float(np.mean(sub)) if sub.size else 0.0
+                max_i  = float(np.max(sub))  if sub.size else 0.0
+                detections.append(CrystalDetection(
+                    bbox=(x, y, w, h),
+                    centroid=(cx, cy),
+                    area_px=area,
+                    contour=cnt,
+                    is_nucleation=is_nuc,
+                    mean_intensity=mean_i,
+                    max_intensity=max_i,
+                    perimeter=float(cv2.arcLength(cnt, True)),
+                ))
+        return detections
 
     def generate_training_data(self, output_dir: str = "./training_data"):
         """
