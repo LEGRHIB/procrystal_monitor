@@ -6,19 +6,20 @@ Minimal Flask web app for manual crystallization annotation.
 
 Run:
     python app.py
-    open http://localhost:5050
-
-Expects experiments at:
+    open http://localhost:8000
     ~/OneDrive - KU Leuven/DATA/experiments/<ID>/raw_images/img_YYYYMMDD_HHMMSS.png
 """
 
+import csv
+import io
 import json
+import math
 import os
 import re
-import math
+import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
-import io
 
 try:
     from openpyxl import Workbook
@@ -40,7 +41,10 @@ from flask import Flask, jsonify, render_template, request, send_file, abort
 
 _default_root = Path.home() / "OneDrive - KU Leuven" / "DATA" / "experiments"
 DATA_ROOT = Path(os.environ.get("CRYSTAL_DATA_ROOT", str(_default_root)))
-FNAME_RE = re.compile(r"^img_(\d{8})_(\d{6})\.png$")
+# Match img_YYYYMMDD_HHMMSS.{png,jpg,jpeg} (strict formatting)
+FNAME_RE = re.compile(r"^img_(\d{8})_(\d{6})\.(png|jpg|jpeg)$", re.IGNORECASE)
+# Accept any image extension
+IMAGE_EXTS = {".png", ".jpg", ".jpeg"}
 
 app = Flask(__name__)
 
@@ -93,17 +97,21 @@ def apply_enhancement(image):
     return corrected.astype(np.uint8)
 
 
-# In-memory cache: {exp_name: (ref_filename, np.ndarray)}
+# In-memory cache: {(exp_name, ref_filename): np.ndarray}
 _ref_cache: dict = {}
 
+# Export progress: {exp_name: {current, total, done}}
+_export_progress: dict = {}
 
-def align_to_reference(ref_gray_f32: "np.ndarray", target_img: "np.ndarray") -> "np.ndarray":
-    """Phase-correlation drift correction (translation only, clamped to ±50 px).
+
+def align_to_reference(ref_gray_f32: "np.ndarray", target_img: "np.ndarray",
+                       drift_clamp_px: float = 50.0) -> "np.ndarray":
+    """Phase-correlation drift correction (translation only, clamped to ±drift_clamp_px).
     Returns target_img warped so it aligns with ref_gray_f32."""
     tgt_gray = cv2.cvtColor(target_img, cv2.COLOR_BGR2GRAY).astype(np.float32)
     (dx, dy), _ = cv2.phaseCorrelate(ref_gray_f32, tgt_gray)
-    dx = max(-50.0, min(50.0, dx))
-    dy = max(-50.0, min(50.0, dy))
+    dx = max(-drift_clamp_px, min(drift_clamp_px, dx))
+    dy = max(-drift_clamp_px, min(drift_clamp_px, dy))
     M = np.float32([[1, 0, -dx], [0, 1, -dy]])
     h, w = target_img.shape[:2]
     return cv2.warpAffine(target_img, M, (w, h),
@@ -123,6 +131,93 @@ def apply_temporal_enhancement(ref_img: "np.ndarray", current_img: "np.ndarray")
         diff = (diff - p1) / (p99 - p1) * 255.0
         diff = np.clip(diff, 0, 255)
     return diff.astype(np.uint8)
+
+
+def _incremental_export_frame(exp_name: str, frame_idx: int):
+    """Update dataset/coco_crystals.json for a single frame after annotation changes.
+    Only runs if dataset/ folder already exists (full export was done first).
+    Thread-safe via a per-experiment lock."""
+    if not HAS_CV2:
+        return
+    dataset_dir = DATA_ROOT / exp_name / "dataset"
+    coco_path = dataset_dir / "coco_crystals.json"
+    if not dataset_dir.exists() or not coco_path.exists():
+        return  # no dataset yet — user must do full export first
+
+    try:
+        frames = scan_experiment(DATA_ROOT / exp_name)
+        cal = get_tube_width_calibration(exp_name)
+        pixels_per_mm = cal.get("pixels_per_mm")
+        lpath = annotations_dir(exp_name) / "lengths.jsonl"
+
+        # Load existing COCO
+        coco = json.loads(coco_path.read_text())
+
+        # Remove all annotations for this frame
+        coco["annotations"] = [
+            a for a in coco.get("annotations", [])
+            if a.get("image_id") != frame_idx
+        ]
+
+        # Add fresh annotations for this frame from lengths.jsonl
+        if lpath.exists():
+            next_id = max((a["id"] for a in coco["annotations"]), default=0) + 1
+            for line in lpath.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                m = json.loads(line)
+                if m.get("frame_idx") != frame_idx:
+                    continue
+                cid = m.get("crystal_id", "")
+                if cid.startswith("__"):
+                    continue
+                p1, p2 = m.get("p1", {}), m.get("p2", {})
+                if not p1 or not p2:
+                    continue
+                x_min = min(p1["x"], p2["x"])
+                y_min = min(p1["y"], p2["y"])
+                bw = abs(p2["x"] - p1["x"])
+                bh = abs(p2["y"] - p1["y"])
+                ann = {
+                    "id": next_id,
+                    "image_id": frame_idx,
+                    "category_id": 1,
+                    "crystal_id": cid,
+                    "direction": m.get("direction"),
+                    "bbox": [x_min, y_min, bw, bh],
+                    "h_px": m.get("h_px"),
+                    "v_px": m.get("v_px"),
+                    "measurement_id": m.get("id"),
+                }
+                if pixels_per_mm:
+                    if m.get("h_px"):
+                        ann["h_um"] = round(m["h_px"] / pixels_per_mm * 1000, 2)
+                    if m.get("v_px"):
+                        ann["v_um"] = round(m["v_px"] / pixels_per_mm * 1000, 2)
+                coco["annotations"].append(ann)
+                next_id += 1
+
+        coco_path.write_text(json.dumps(coco, indent=2))
+
+        # Re-save crop image for this frame if crop_region is stored in settings
+        settings = load_settings(exp_name)
+        crop_region = settings.get("crop_region")
+        if crop_region and frame_idx < len(frames):
+            frame_file = frames[frame_idx]["filename"]
+            img = cv2.imread(str(DATA_ROOT / exp_name / "raw_images" / frame_file))
+            if img is not None:
+                cx = int(crop_region.get("x", 0))
+                cy = int(crop_region.get("y", 0))
+                cw = int(crop_region.get("w", img.shape[1]))
+                ch = int(crop_region.get("h", img.shape[0]))
+                crop = img[cy:cy + ch, cx:cx + cw]
+                stem = frame_file.replace(".png", "")
+                crops_dir = dataset_dir / "crops"
+                if crops_dir.exists():
+                    cv2.imwrite(str(crops_dir / f"{stem}.png"), crop)
+    except Exception:
+        pass  # best-effort, don't disrupt the annotation workflow
 
 
 def _build_coco_crystals(exp_name: str, dataset_dir: Path, frames: list, cal: dict):
@@ -176,7 +271,7 @@ def _build_coco_crystals(exp_name: str, dataset_dir: Path, frames: list, cal: di
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
 def parse_timestamp(fname: str):
-    """Return datetime from 'img_YYYYMMDD_HHMMSS.png', or None."""
+    """Return datetime from 'img_YYYYMMDD_HHMMSS.{png,jpg,jpeg}', or None if unparseable."""
     m = FNAME_RE.match(fname)
     if m is None:
         return None
@@ -187,16 +282,32 @@ def parse_timestamp(fname: str):
 
 
 def scan_experiment(exp_path: Path) -> list[dict]:
-    """Return sorted list of {filename, timestamp_iso, t_sec, frame_idx}."""
+    """Return sorted list of {filename, timestamp_iso, t_sec, frame_idx}.
+    Accepts any image file (png, jpg, jpeg) with or without img_YYYYMMDD_HHMMSS naming.
+    For files without parseable timestamps, uses file modification time as fallback.
+    """
     raw = exp_path / "raw_images"
     if not raw.is_dir():
         return []
 
     frames = []
     for f in sorted(raw.iterdir()):
+        # Accept any image extension
+        if f.suffix.lower() not in IMAGE_EXTS:
+            continue
+        
+        # Try to parse timestamp from filename
         ts = parse_timestamp(f.name)
-        if ts:
-            frames.append({"filename": f.name, "timestamp": ts})
+        
+        # Fallback to file modification time if timestamp parse fails
+        if ts is None:
+            try:
+                ts = datetime.fromtimestamp(f.stat().st_mtime)
+            except (OSError, ValueError):
+                # If we can't get mtime, skip this file
+                continue
+        
+        frames.append({"filename": f.name, "timestamp": ts})
 
     frames.sort(key=lambda r: r["timestamp"])
     if not frames:
@@ -239,29 +350,79 @@ def results_dir(exp_name: str) -> Path:
     return p
 
 
+_SETTINGS_DEFAULTS = {
+    "tube_width_mm": 1.5,
+    "droplet_diameter_mm": 1.0,
+    "drift_clamp_px": 50,
+    "crop_region": None,
+}
+
+
+def load_settings(exp_name: str) -> dict:
+    spath = DATA_ROOT / exp_name / "settings.json"
+    if spath.exists():
+        try:
+            saved = json.loads(spath.read_text())
+            return {**_SETTINGS_DEFAULTS, **saved}
+        except Exception:
+            pass
+    return dict(_SETTINGS_DEFAULTS)
+
+
+def save_settings(exp_name: str, data: dict):
+    spath = DATA_ROOT / exp_name / "settings.json"
+    current = load_settings(exp_name)
+    current.update(data)
+    spath.write_text(json.dumps(current, indent=2))
+
+
+def _migrate_lengths_ids(exp_name: str):
+    """Back-fill UUID ids into any length records that predate the UUID system.
+    Idempotent — safe to call on every read/delete."""
+    lpath = annotations_dir(exp_name) / "lengths.jsonl"
+    if not lpath.exists():
+        return
+    raw = lpath.read_text().splitlines()
+    updated = []
+    changed = False
+    for line in raw:
+        line = line.strip()
+        if not line:
+            continue
+        obj = json.loads(line)
+        if "id" not in obj:
+            obj["id"] = str(uuid.uuid4())
+            changed = True
+        updated.append(json.dumps(obj))
+    if changed:
+        lpath.write_text("\n".join(updated) + "\n")
+
+
 def get_tube_width_calibration(exp_name: str) -> dict:
     """Extract calibration from __TUBE_WIDTH__ measurement in lengths.jsonl.
-    Tube width is known to be 1.5 mm.
+    Tube width is read from settings (default 1.5 mm).
     Returns {pixels_per_mm: float} or empty dict if not calibrated."""
     lpath = annotations_dir(exp_name) / "lengths.jsonl"
     if not lpath.exists():
         return {}
+
+    settings = load_settings(exp_name)
+    tube_width_mm = settings.get("tube_width_mm", 1.5)
 
     for line in lpath.read_text().splitlines():
         line = line.strip()
         if line:
             obj = json.loads(line)
             if obj.get("crystal_id") == "__TUBE_WIDTH__":
-                # Found calibration measurement
                 tube_width_px = obj.get("h_px") or obj.get("v_px")
-                if tube_width_px:
-                    pixels_per_mm = tube_width_px / 1.5
+                if tube_width_px and tube_width_px > 0 and tube_width_mm > 0:
+                    pixels_per_mm = tube_width_px / tube_width_mm
                     p1 = obj.get("p1", {})
                     p2 = obj.get("p2", {})
                     result = {
                         "pixels_per_mm": pixels_per_mm,
                         "tube_width_px": tube_width_px,
-                        "tube_width_mm": 1.5,
+                        "tube_width_mm": tube_width_mm,
                     }
                     if p1 and p2:
                         result["tube_x1"] = int(min(p1.get("x", 0), p2.get("x", 0)))
@@ -274,39 +435,38 @@ def get_droplet_height(exp_name: str) -> dict:
     """
     Extract droplet height from lengths.jsonl.
     Returns {height_px, height_um, volume_ul} or empty dict.
-    Assumes droplet diameter = 1.2 mm (cylindrical approximation).
+    Droplet diameter is read from settings (default 1.0 mm).
     """
     lpath = annotations_dir(exp_name) / "lengths.jsonl"
     if not lpath.exists():
         return {}
 
-    # First get calibration
     calibration = get_tube_width_calibration(exp_name)
     if not calibration:
         return {}
 
     pixels_per_mm = calibration["pixels_per_mm"]
+    settings = load_settings(exp_name)
+    droplet_diameter_mm = settings.get("droplet_diameter_mm", 1.0)
+    radius_mm = droplet_diameter_mm / 2.0
 
-    # Find __DROPLET_HEIGHT__ measurement
     for line in lpath.read_text().splitlines():
         line = line.strip()
         if line:
             obj = json.loads(line)
             if obj.get("crystal_id") == "__DROPLET_HEIGHT__":
                 height_px = obj.get("v_px", 0)
-                if height_px > 0:
+                if height_px > 0 and pixels_per_mm > 0:
                     height_mm = height_px / pixels_per_mm
                     height_um = height_mm * 1000
-                    # Volume = π * r² * h, where r = 0.6 mm (diameter 1.2mm)
-                    # Result in µL (mm³)
-                    radius_mm = 0.6
-                    volume_ul = 3.14159 * (radius_mm ** 2) * height_mm
+                    # Volume = π * r² * h  (cylindrical approximation), result in µL (mm³)
+                    volume_ul = math.pi * (radius_mm ** 2) * height_mm
                     return {
                         "height_px": height_px,
                         "height_mm": round(height_mm, 3),
                         "height_um": round(height_um, 2),
                         "volume_ul": round(volume_ul, 3),
-                        "droplet_diameter_mm": 1.2
+                        "droplet_diameter_mm": droplet_diameter_mm,
                     }
 
     return {}
@@ -630,14 +790,13 @@ def api_enhanced_crop(exp_name: str, filename: str):
         exp_frames = scan_experiment(DATA_ROOT / exp_name)
         ref_filename = exp_frames[0]["filename"] if exp_frames else filename
 
-    cached = _ref_cache.get(exp_name)
-    if cached is None or cached[0] != ref_filename:
+    cache_key = (exp_name, ref_filename)
+    ref_img = _ref_cache.get(cache_key)
+    if ref_img is None:
         ref_path = DATA_ROOT / exp_name / "raw_images" / ref_filename
         ref_img = cv2.imread(str(ref_path))
         if ref_img is not None:
-            _ref_cache[exp_name] = (ref_filename, ref_img)
-    else:
-        ref_img = cached[1]
+            _ref_cache[cache_key] = ref_img
 
     crop = img[y:y2, x:x2]
     if ref_img is not None and filename != ref_filename:
@@ -677,6 +836,10 @@ def api_export_dataset(exp_name: str):
     # Load frame 0 as the temporal reference for background subtraction
     ref_img = cv2.imread(str(exp_path / "raw_images" / frames[0]["filename"]))
 
+    # Record first-frame crop region in settings for incremental sync
+    settings = load_settings(exp_name)
+    # crop_region will be updated below after detecting boundaries for frame 0
+
     coco_droplets = {
         "info": {"description": f"Droplet bounding boxes — {exp_name}", "version": "1.0"},
         "categories": [{"id": 1, "name": "droplet", "supercategory": "none"}],
@@ -686,12 +849,16 @@ def api_export_dataset(exp_name: str):
     ann_id    = 1
     processed = 0
     errors    = []
+    first_crop_saved = False
+
+    _export_progress[exp_name] = {"current": 0, "total": len(frames), "done": False}
 
     for frame in frames:
         img_path = exp_path / "raw_images" / frame["filename"]
         img = cv2.imread(str(img_path))
         if img is None:
             errors.append(frame["filename"])
+            _export_progress[exp_name]["current"] += 1
             continue
 
         img_w_px = img.shape[1]
@@ -708,6 +875,11 @@ def api_export_dataset(exp_name: str):
         cy = top
         cw = min(img_w_px, x2_t + pad_x) - cx
         ch = bottom - cy
+
+        # Save the crop region for the first frame into settings for incremental sync
+        if not first_crop_saved:
+            save_settings(exp_name, {"crop_region": {"x": cx, "y": cy, "w": cw, "h": ch}})
+            first_crop_saved = True
 
         crop = img[cy:cy + ch, cx:cx + cw]
         if ref_img is not None and frame["filename"] != frames[0]["filename"]:
@@ -740,9 +912,11 @@ def api_export_dataset(exp_name: str):
         })
         ann_id    += 1
         processed += 1
+        _export_progress[exp_name]["current"] += 1
 
     (dataset_dir / "coco_droplets.json").write_text(json.dumps(coco_droplets, indent=2))
     _build_coco_crystals(exp_name, dataset_dir, frames, cal)
+    _export_progress[exp_name]["done"] = True
 
     return jsonify({
         "ok":         True,
@@ -908,33 +1082,177 @@ def api_get_lengths(exp_name: str):
 @app.post("/api/lengths/<exp_name>")
 def api_add_length(exp_name: str):
     """Append one measurement line to lengths.jsonl.
-    Body: {crystal_id: "crystal_1", frame_idx: N, length: L, ...}"""
+    Body: {crystal_id: "crystal_1", frame_idx: N, ...}
+    Returns {ok, id} with the UUID of the saved measurement."""
     data = request.get_json(force=True)
+    # Accept client-generated UUID or mint a new one
+    data.setdefault("id", str(uuid.uuid4()))
+    data.setdefault("created_at", datetime.utcnow().isoformat() + "Z")
     lpath = annotations_dir(exp_name) / "lengths.jsonl"
     with lpath.open("a") as fh:
         fh.write(json.dumps(data) + "\n")
-    return jsonify({"ok": True})
+
+    # Incremental sync: update dataset if it already exists (best-effort, non-blocking)
+    frame_idx = data.get("frame_idx")
+    if frame_idx is not None:
+        t = threading.Thread(target=_incremental_export_frame, args=(exp_name, frame_idx), daemon=True)
+        t.start()
+
+    return jsonify({"ok": True, "id": data["id"]})
 
 
-@app.delete("/api/lengths/<exp_name>/<crystal_id>/<int:line_idx>")
-def api_delete_length(exp_name: str, crystal_id: str, line_idx: int):
-    """Delete a single measurement by its 0-based line index within a crystal."""
+@app.delete("/api/lengths/<exp_name>/<crystal_id>/<measurement_id>")
+def api_delete_length(exp_name: str, crystal_id: str, measurement_id: str):
+    """Delete a single measurement by its UUID id field."""
+    _migrate_lengths_ids(exp_name)
     lpath = annotations_dir(exp_name) / "lengths.jsonl"
     if not lpath.exists():
-        abort(404)
+        return jsonify({"error": "No measurements file"}), 404
 
-    # Filter only lines for this crystal
     all_lines = [l for l in lpath.read_text().splitlines() if l.strip()]
-    crystal_lines = [l for l in all_lines if json.loads(l).get("crystal_id") == crystal_id]
+    new_lines = []
+    deleted_frame = None
+    deleted = False
+    for line in all_lines:
+        obj = json.loads(line)
+        if obj.get("crystal_id") == crystal_id and obj.get("id") == measurement_id:
+            deleted = True
+            deleted_frame = obj.get("frame_idx")
+        else:
+            new_lines.append(line)
 
-    if line_idx < 0 or line_idx >= len(crystal_lines):
+    if not deleted:
+        return jsonify({"error": "Measurement not found"}), 404
+
+    lpath.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
+
+    # Incremental sync after deletion (best-effort, non-blocking)
+    if deleted_frame is not None:
+        t = threading.Thread(target=_incremental_export_frame, args=(exp_name, deleted_frame), daemon=True)
+        t.start()
+
+    return jsonify({"ok": True})
+
+
+# ── settings ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/settings/<exp_name>")
+def api_get_settings(exp_name: str):
+    return jsonify(load_settings(exp_name))
+
+
+@app.post("/api/settings/<exp_name>")
+def api_save_settings(exp_name: str):
+    data = request.get_json(force=True) or {}
+    # Validate numeric fields
+    for key in ("tube_width_mm", "droplet_diameter_mm", "drift_clamp_px"):
+        if key in data:
+            try:
+                data[key] = float(data[key])
+            except (ValueError, TypeError):
+                return jsonify({"error": f"Invalid value for {key}"}), 400
+    save_settings(exp_name, data)
+    return jsonify({"ok": True, "settings": load_settings(exp_name)})
+
+
+# ── crystal notes PATCH ────────────────────────────────────────────────────────
+
+@app.route("/api/crystals/<exp_name>/<crystal_id>", methods=["PATCH"])
+def api_patch_crystal(exp_name: str, crystal_id: str):
+    """Update notes (or other fields) for a crystal."""
+    data = request.get_json(force=True) or {}
+    crystals = load_crystals(exp_name)
+    found = False
+    for crystal in crystals["crystals"]:
+        if crystal["id"] == crystal_id:
+            if "notes" in data:
+                crystal["notes"] = data["notes"]
+            found = True
+            break
+    if not found:
+        return jsonify({"error": "Crystal not found"}), 404
+    save_crystals(exp_name, crystals)
+    return jsonify({"ok": True})
+
+
+# ── cache reset ────────────────────────────────────────────────────────────────
+
+@app.post("/api/reset_cache/<exp_name>")
+def api_reset_cache(exp_name: str):
+    """Evict all cached reference frames for this experiment."""
+    to_remove = [k for k in _ref_cache if k[0] == exp_name]
+    for k in to_remove:
+        del _ref_cache[k]
+    return jsonify({"ok": True, "evicted": len(to_remove)})
+
+
+# ── export: CSV ────────────────────────────────────────────────────────────────
+
+@app.get("/api/export/<exp_name>/csv")
+def api_export_csv(exp_name: str):
+    """Export all measurements as CSV download."""
+    exp_path = DATA_ROOT / exp_name
+    if not exp_path.is_dir():
         abort(404)
 
-    # Remove the specific measurement
-    to_delete = crystal_lines[line_idx]
-    all_lines.remove(to_delete)
-    lpath.write_text("\n".join(all_lines) + ("\n" if all_lines else ""))
-    return jsonify({"ok": True})
+    frames = scan_experiment(exp_path)
+    frame_map = {f["frame_idx"]: f for f in frames}
+    cal = get_tube_width_calibration(exp_name)
+    pixels_per_mm = cal.get("pixels_per_mm")
+
+    lpath = annotations_dir(exp_name) / "lengths.jsonl"
+    rows = []
+    if lpath.exists():
+        for line in lpath.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            m = json.loads(line)
+            cid = m.get("crystal_id", "")
+            if cid.startswith("__"):
+                continue
+            fi = m.get("frame_idx", "")
+            frame = frame_map.get(fi, {})
+            h_mm = round(m["h_px"] / pixels_per_mm, 4) if m.get("h_px") and pixels_per_mm else ""
+            v_mm = round(m["v_px"] / pixels_per_mm, 4) if m.get("v_px") and pixels_per_mm else ""
+            rows.append({
+                "id": m.get("id", ""),
+                "crystal_id": cid,
+                "frame_idx": fi,
+                "timestamp_iso": frame.get("timestamp_iso", ""),
+                "t_min": frame.get("t_min", ""),
+                "direction": m.get("direction", ""),
+                "h_px": m.get("h_px", ""),
+                "h_mm": h_mm,
+                "v_px": m.get("v_px", ""),
+                "v_mm": v_mm,
+                "created_at": m.get("created_at", ""),
+            })
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=[
+        "id", "crystal_id", "frame_idx", "timestamp_iso", "t_min",
+        "direction", "h_px", "h_mm", "v_px", "v_mm", "created_at"
+    ])
+    writer.writeheader()
+    writer.writerows(rows)
+    buf.seek(0)
+
+    return send_file(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name=f"{exp_name}_measurements.csv",
+    )
+
+
+# ── export: progress ───────────────────────────────────────────────────────────
+
+@app.get("/api/export/<exp_name>/progress")
+def api_export_progress(exp_name: str):
+    """Return current export progress for polling."""
+    prog = _export_progress.get(exp_name, {"current": 0, "total": 0, "done": True})
+    return jsonify(prog)
 
 
 # ─── main ────────────────────────────────────────────────────────────────────
@@ -950,5 +1268,5 @@ if __name__ == "__main__":
     print("    PUT  /api/crystals/<exp_name>/<id>/nucleation - Set nucleation time")
     print("    GET  /api/lengths/<exp_name>?crystal_id=<id> - Get measurements")
     print()
-    print("  Open  http://localhost:5050  in your browser.\n")
-    app.run(host="127.0.0.1", port=5050, debug=False)
+    print("  Open  http://localhost:8000  in your browser.\n")
+    app.run(host="127.0.0.1", port=8000, debug=False)

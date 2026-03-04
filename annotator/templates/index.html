@@ -36,7 +36,10 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
 #sidebar{width:380px;flex-shrink:0;border-left:1px solid #30363d;display:flex;
          flex-direction:column;background:#161b22;overflow-y:auto}
 #sidebar h3{font-size:13px;color:#8b949e;padding:10px 12px 4px;text-transform:uppercase;
-            letter-spacing:.5px}
+            letter-spacing:.5px;cursor:pointer;user-select:none}
+#sidebar h3:hover{color:#c9d1d9}
+#sidebar h3 .toggle-icon{float:left;margin-right:6px;font-size:10px;transition:transform .2s}
+#sidebar h3 .toggle-icon.collapsed{transform:rotate(-90deg)}
 
 /* buttons */
 .btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid #30363d;
@@ -49,7 +52,7 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
 .btn-row{display:flex;gap:6px;padding:6px 12px;flex-wrap:wrap}
 
 /* crystal list */
-#crystals-list{padding:0 12px 12px;overflow-y:auto;max-height:200px}
+#crystals-list{padding:0 12px 12px;overflow-y:auto;max-height:350px;min-height:100px}
 .crystal-item{display:flex;align-items:center;justify-content:space-between;
               padding:8px;border:1px solid #30363d;border-radius:4px;margin-bottom:6px;
               background:#21262d;cursor:pointer;transition:background .15s}
@@ -69,7 +72,7 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
 .btn-row.measure-btns .btn{font-size:12px;padding:4px 8px}
 
 /* measurements list */
-#measurements{flex:1;overflow-y:auto;padding:0 12px 12px}
+#measurements{overflow-y:auto;padding:0 12px 12px;max-height:350px;min-height:100px}
 .meas-item{display:flex;align-items:center;justify-content:space-between;
            font-size:12px;padding:5px 8px;border-bottom:1px solid #21262d}
 .meas-item.for-crystal{background:rgba(31,111,235,.1)}
@@ -82,6 +85,7 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
 
 /* dashboard */
 #dashboard{padding:6px 12px 12px;font-size:12px}
+#dashboard.collapsed{display:none}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .dash-card{background:#21262d;border:1px solid #30363d;border-radius:6px;padding:8px}
 .dash-title{font-size:11px;color:#8b949e;margin-bottom:6px;text-transform:uppercase;
@@ -103,8 +107,73 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
 
 /* growth chart */
 #chart-section{padding:0 12px 12px}
+#chart-section.collapsed{display:none}
 #chart-wrap{background:#21262d;border:1px solid #30363d;border-radius:6px;
             padding:8px;position:relative;height:200px}
+
+/* chart controls */
+#chart-controls{display:flex;gap:6px;padding:0 12px 4px;align-items:center;flex-wrap:wrap}
+#chart-controls.collapsed{display:none}
+#chart-controls select,#chart-controls button{font-size:11px;padding:2px 6px}
+
+/* frame scrubber */
+#scrubber-row{width:100%;padding:4px 8px 0;display:flex;align-items:center;gap:6px}
+#frame-scrubber{flex:1;accent-color:#1f6feb;cursor:pointer}
+#scrubber-label{font-size:11px;color:#6e7681;white-space:nowrap;min-width:60px;text-align:right}
+
+/* toast notifications */
+#toast-container{position:fixed;bottom:20px;right:20px;z-index:9999;
+                 display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{padding:10px 16px;border-radius:6px;font-size:13px;color:#fff;
+       max-width:360px;opacity:0;transform:translateY(8px);
+       transition:opacity .25s,transform .25s;pointer-events:all;
+       display:flex;align-items:center;gap:10px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.info {background:#1f6feb}
+.toast.success{background:#238636}
+.toast.error {background:#da3633}
+.toast.warn  {background:#9e6a03}
+.toast .undo-btn{cursor:pointer;text-decoration:underline;opacity:.85;
+                 background:none;border:none;color:inherit;font-size:12px;padding:0}
+
+/* spinner overlay */
+#spinner{position:fixed;inset:0;background:rgba(1,4,9,.55);z-index:8888;
+         display:none;align-items:center;justify-content:center}
+#spinner .spin-box{display:flex;flex-direction:column;align-items:center;gap:12px;
+                   background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px 32px}
+#spinner .spin-ring{width:36px;height:36px;border:3px solid #30363d;
+                    border-top-color:#1f6feb;border-radius:50%;animation:spin .8s linear infinite}
+#spinner .spin-msg{font-size:13px;color:#8b949e}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* progress bar */
+#progress-bar-wrap{display:none;padding:0 12px 8px}
+#progress-bar-track{background:#21262d;border-radius:4px;height:6px;overflow:hidden}
+#progress-bar-fill{height:100%;background:#1f6feb;width:0%;transition:width .3s}
+#progress-label{font-size:11px;color:#6e7681;margin-top:4px}
+
+/* modal backdrop */
+.modal-backdrop{position:fixed;inset:0;background:rgba(1,4,9,.7);z-index:7777;
+                display:none;align-items:center;justify-content:center}
+.modal-backdrop.open{display:flex}
+.modal-box{background:#161b22;border:1px solid #30363d;border-radius:8px;
+           padding:20px;min-width:340px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto}
+.modal-box h2{font-size:15px;margin-bottom:14px;color:#e6edf3}
+.modal-box table{width:100%;border-collapse:collapse;font-size:12px}
+.modal-box table td{padding:5px 8px;border-bottom:1px solid #21262d}
+.modal-box table td:first-child{color:#8b949e;white-space:nowrap}
+.modal-box .field-row{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.modal-box label{font-size:12px;color:#8b949e}
+.modal-box input[type=number]{background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+                               border-radius:4px;padding:5px 8px;font-size:13px;width:100%}
+.modal-close{float:right;cursor:pointer;color:#6e7681;font-size:18px;line-height:1;
+             background:none;border:none}
+.modal-close:hover{color:#c9d1d9}
+
+/* notes textarea */
+.crystal-notes{width:100%;margin-top:4px;padding:4px 6px;background:#0d1117;
+               color:#c9d1d9;border:1px solid #30363d;border-radius:4px;
+               font-size:11px;resize:vertical;min-height:36px;box-sizing:border-box}
 </style>
 </head>
 <body>
@@ -118,7 +187,75 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
   <button class="btn" id="btn-next" title="Next frame  [→]">Next →</button>
   <span style="color:#30363d">│</span>
   <span id="nav-label" style="font-size:13px;color:#8b949e">No experiment</span>
+  <span style="flex:1"></span>
+  <button class="btn" id="btn-settings" title="Settings  [S]" onclick="openSettings()" style="padding:4px 8px">⚙</button>
+  <button class="btn" id="btn-help" title="Keyboard shortcuts  [?]" onclick="toggleHelpModal()" style="padding:4px 8px">?</button>
 </div>
+
+<!-- ═══ MODALS ════════════════════════════════════════════════════════════ -->
+
+<!-- Help modal -->
+<div class="modal-backdrop" id="help-modal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="toggleHelpModal()">✕</button>
+    <h2>Keyboard Shortcuts</h2>
+    <table>
+      <tr><td><kbd>← →</kbd></td><td>Navigate frames</td></tr>
+      <tr><td><kbd>H</kbd></td><td>Horizontal measurement</td></tr>
+      <tr><td><kbd>V</kbd></td><td>Vertical measurement</td></tr>
+      <tr><td><kbd>T</kbd></td><td>Calibrate tube width</td></tr>
+      <tr><td><kbd>D</kbd></td><td>Measure droplet height</td></tr>
+      <tr><td><kbd>A</kbd></td><td>Auto crop to droplet</td></tr>
+      <tr><td><kbd>E</kbd></td><td>Toggle temporal enhancement</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Set reference frame</td></tr>
+      <tr><td><kbd>N</kbd></td><td>Mark nucleation</td></tr>
+      <tr><td><kbd>Ctrl+Z</kbd></td><td>Undo last measurement</td></tr>
+      <tr><td><kbd>Ctrl+Shift+X</kbd></td><td>Clear frame measurements</td></tr>
+      <tr><td><kbd>Ctrl+N</kbd></td><td>Reset nucleation marker</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Cancel measurement</td></tr>
+      <tr><td><kbd>S</kbd></td><td>Open settings</td></tr>
+      <tr><td><kbd>?</kbd></td><td>Toggle this help</td></tr>
+    </table>
+    <div style="margin-top:12px;text-align:right">
+      <button class="btn" onclick="toggleHelpModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div class="modal-backdrop" id="settings-modal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeSettings()">✕</button>
+    <h2>⚙ Settings</h2>
+    <div class="field-row">
+      <label>Tube width (mm) — used for px/mm calibration</label>
+      <input type="number" id="set-tube-width" step="0.01" min="0.1" value="1.5">
+    </div>
+    <div class="field-row">
+      <label>Droplet diameter (mm) — used for volume calculation</label>
+      <input type="number" id="set-droplet-diam" step="0.01" min="0.1" value="1.0">
+    </div>
+    <div class="field-row">
+      <label>Drift clamp (px) — max phase-correlation shift for alignment</label>
+      <input type="number" id="set-drift-clamp" step="1" min="1" value="50">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:4px;justify-content:flex-end">
+      <button class="btn" onclick="closeSettings()">Cancel</button>
+      <button class="btn success" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Spinner overlay -->
+<div id="spinner">
+  <div class="spin-box">
+    <div class="spin-ring"></div>
+    <div class="spin-msg" id="spinner-msg">Loading…</div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
 
 <!-- ═══ MAIN AREA ═════════════════════════════════════════════════════════ -->
 <div id="main">
@@ -128,6 +265,10 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
     <div id="frame-info">—</div>
     <canvas id="cv" width="1280" height="960"></canvas>
     <div id="measure-hint"></div>
+    <div id="scrubber-row">
+      <input type="range" id="frame-scrubber" min="0" max="0" value="0" style="flex:1">
+      <span id="scrubber-label">0 / 0</span>
+    </div>
   </div>
 
   <!-- sidebar -->
@@ -180,23 +321,48 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
           ✕ Cancel
         </button>
       </div>
+      <div class="btn-row measure-btns" style="margin-top:6px">
+        <button class="btn" id="btn-undo" title="Undo last measurement  [Ctrl+Z]" onclick="undoLastMeasurement()">
+          ↶ Undo <span class="hotkey">Ctrl+Z</span>
+        </button>
+        <button class="btn danger" id="btn-clear-frame" title="Clear all measurements on this frame  [Ctrl+Shift+X]" onclick="clearCurrentFrame()">
+          🗑 Clear Frame
+        </button>
+      </div>
       <div style="margin-top:8px;padding:6px 8px;border-radius:4px;background:#21262d;
                   font-size:11px;color:#6e7681">
         Mark nucleation: <span class="hotkey">N</span>
+        <button class="btn" id="btn-reset-nuc" title="Reset nucleation marker  [Ctrl+N]" onclick="resetNucleation()" style="float:right;font-size:10px;padding:2px 6px">
+          ✕ Reset Nuc
+        </button>
       </div>
     </div>
 
-      <h3>Dashboard
-        <button class="btn" id="btn-export-excel" title="Export metrics to Excel" style="float:right;font-size:11px;padding:4px 8px">
+      <h3 onclick="toggleSection('dashboard')"><span class="toggle-icon">▼</span>Dashboard
+        <button class="btn" id="btn-export-excel" title="Export metrics to Excel" style="float:right;font-size:11px;padding:4px 8px" onclick="event.stopPropagation()">
           📊 Excel
         </button>
-        <button class="btn" id="btn-export-dataset" title="Export crops + COCO JSON to dataset/ folder" style="float:right;font-size:11px;padding:4px 8px;margin-right:4px" onclick="exportDataset()">
+        <button class="btn" id="btn-export-csv" title="Download measurements CSV" style="float:right;font-size:11px;padding:4px 8px;margin-right:4px" onclick="event.stopPropagation();exportCSV()">
+          📋 CSV
+        </button>
+        <button class="btn" id="btn-export-dataset" title="Export crops + COCO JSON to dataset/ folder" style="float:right;font-size:11px;padding:4px 8px;margin-right:4px" onclick="event.stopPropagation();exportDataset()">
           💾 Export Dataset
         </button>
+        <span id="sync-badge" style="float:right;font-size:10px;color:#3fb950;padding:5px 4px;display:none">✓ synced</span>
       </h3>
+      <div id="progress-bar-wrap">
+        <div id="progress-bar-track"><div id="progress-bar-fill"></div></div>
+        <div id="progress-label"></div>
+      </div>
       <div id="dashboard"></div>
 
-    <h3>Growth Curves</h3>
+    <h3 onclick="toggleSection('chart')"><span class="toggle-icon">▼</span>Growth Curves</h3>
+    <div id="chart-controls">
+      <select id="chart-crystal-filter" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px">
+        <option value="all">All crystals</option>
+      </select>
+      <button class="btn" id="btn-chart-type" onclick="toggleChartType()" style="font-size:11px;padding:2px 8px">Scatter</button>
+    </div>
     <div id="chart-section">
       <div id="chart-wrap">
         <canvas id="growth-chart"></canvas>
@@ -215,6 +381,7 @@ canvas{cursor:crosshair;max-width:100%;max-height:100%;object-fit:contain}
     &nbsp; <span class="hotkey">N</span> nucleation
     &nbsp; <span class="hotkey">H</span> horiz
     &nbsp; <span class="hotkey">V</span> vert
+    &nbsp; <span class="hotkey">Ctrl+Z</span> undo
     &nbsp; <span class="hotkey">A</span> auto crop
     &nbsp; <span class="hotkey">E</span> enhance
     &nbsp; <span class="hotkey">R</span> set ref
@@ -233,6 +400,10 @@ let selectedCrystalId = null;    // currently selected crystal ID
 let allLengths   = [];           // all measurements for this experiment
 let calibration  = {};           // {pixels_per_mm, tube_width_px} if calibrated
 let dropletInfo  = {};           // {height_um, volume_ul} if droplet measured
+let expSettings  = {};           // configurable physical constants
+let chartType    = "line";       // "line" | "scatter"
+let chartCrystalFilter = "all";  // "all" | crystal id
+let _pendingDeletes = {};        // {measId: timeoutId} for soft-delete undo
 
 // measurement mode
 let mode  = null;               // null | "h" | "v" | "tube" | "droplet"
@@ -265,6 +436,157 @@ const $btnV             = document.getElementById("btn-v");
 const $autosave         = document.getElementById("autosave-indicator");
 const $calStatus        = document.getElementById("calibration-status");
 
+// ─── toast ──────────────────────────────────────────────────────────────────
+function toast(msg, type="info", duration=3500, undoFn=null){
+  const container = document.getElementById("toast-container");
+  const el = document.createElement("div");
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span style="flex:1">${msg}</span>`;
+  if(undoFn){
+    const btn = document.createElement("button");
+    btn.className = "undo-btn";
+    btn.textContent = "Undo";
+    btn.onclick = ()=>{ undoFn(); el.remove(); };
+    el.appendChild(btn);
+  }
+  container.appendChild(el);
+  requestAnimationFrame(()=>el.classList.add("show"));
+  setTimeout(()=>{
+    el.classList.remove("show");
+    setTimeout(()=>el.remove(), 300);
+  }, duration);
+}
+
+// ─── spinner ─────────────────────────────────────────────────────────────────
+function showSpinner(msg="Loading…"){
+  document.getElementById("spinner-msg").textContent = msg;
+  document.getElementById("spinner").style.display = "flex";
+}
+function hideSpinner(){
+  document.getElementById("spinner").style.display = "none";
+}
+
+// ─── help modal ──────────────────────────────────────────────────────────────
+function toggleHelpModal(){
+  const m = document.getElementById("help-modal");
+  m.classList.toggle("open");
+}
+
+// ─── section collapse ────────────────────────────────────────────────────────
+function toggleSection(sectionName){
+  if(sectionName === 'dashboard'){
+    const dash = document.getElementById("dashboard");
+    dash.classList.toggle("collapsed");
+    const icon = event.currentTarget.querySelector(".toggle-icon");
+    if(icon) icon.classList.toggle("collapsed");
+  } else if(sectionName === 'chart'){
+    const chart = document.getElementById("chart-section");
+    const controls = document.getElementById("chart-controls");
+    chart.classList.toggle("collapsed");
+    controls.classList.toggle("collapsed");
+    const icon = event.currentTarget.querySelector(".toggle-icon");
+    if(icon) icon.classList.toggle("collapsed");
+  }
+}
+
+// ─── settings ────────────────────────────────────────────────────────────────
+async function openSettings(){
+  if(!expName){ toast("Load an experiment first.", "warn"); return; }
+  const s = await api(`/api/settings/${expName}`);
+  document.getElementById("set-tube-width").value   = s.tube_width_mm   ?? 1.5;
+  document.getElementById("set-droplet-diam").value = s.droplet_diameter_mm ?? 1.0;
+  document.getElementById("set-drift-clamp").value  = s.drift_clamp_px  ?? 50;
+  document.getElementById("settings-modal").classList.add("open");
+}
+function closeSettings(){
+  document.getElementById("settings-modal").classList.remove("open");
+}
+async function saveSettings(){
+  const payload = {
+    tube_width_mm:      parseFloat(document.getElementById("set-tube-width").value),
+    droplet_diameter_mm:parseFloat(document.getElementById("set-droplet-diam").value),
+    drift_clamp_px:     parseFloat(document.getElementById("set-drift-clamp").value),
+  };
+  const res  = await apiPost(`/api/settings/${expName}`, payload);
+  const data = await res.json();
+  if(data.error){ toast("Save failed: " + data.error, "error"); return; }
+  expSettings = data.settings;
+  closeSettings();
+  // Reload calibration + droplet with new constants
+  calibration = await api(`/api/calibration/${expName}`) || {};
+  dropletInfo = await api(`/api/droplet/${expName}`) || {};
+  renderCalibrationStatus();
+  renderDropletStatus();
+  renderDashboard();
+  renderGrowthChart();
+  toast("Settings saved.", "success");
+}
+
+// ─── chart controls ───────────────────────────────────────────────────────────
+function toggleChartType(){
+  chartType = chartType === "line" ? "scatter" : "line";
+  document.getElementById("btn-chart-type").textContent = chartType === "line" ? "Scatter" : "Line";
+  renderGrowthChart();
+}
+
+function updateChartFilter(){
+  chartCrystalFilter = document.getElementById("chart-crystal-filter").value;
+  renderGrowthChart();
+}
+
+function syncChartFilterOptions(){
+  const sel = document.getElementById("chart-crystal-filter");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="all">All crystals</option>' +
+    crystals.map(c=>`<option value="${c.id}">${c.id}</option>`).join("");
+  if(crystals.find(c=>c.id===cur)) sel.value = cur;
+  else sel.value = "all";
+  chartCrystalFilter = sel.value;
+}
+
+// ─── export CSV ──────────────────────────────────────────────────────────────
+function exportCSV(){
+  if(!expName){ toast("No experiment loaded.", "warn"); return; }
+  const a = document.createElement("a");
+  a.href = `/api/export/${expName}/csv`;
+  a.download = `${expName}_measurements.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ─── export progress polling ─────────────────────────────────────────────────
+let _exportPollTimer = null;
+function startExportProgressPoll(){
+  const wrap  = document.getElementById("progress-bar-wrap");
+  const fill  = document.getElementById("progress-bar-fill");
+  const label = document.getElementById("progress-label");
+  wrap.style.display = "block";
+  _exportPollTimer = setInterval(async ()=>{
+    const p = await api(`/api/export/${expName}/progress`);
+    const pct = p.total > 0 ? Math.round(p.current / p.total * 100) : 0;
+    fill.style.width = pct + "%";
+    label.textContent = `Exporting frame ${p.current} / ${p.total}…`;
+    if(p.done){
+      clearInterval(_exportPollTimer);
+      _exportPollTimer = null;
+      setTimeout(()=>{ wrap.style.display="none"; fill.style.width="0%"; }, 2000);
+    }
+  }, 500);
+}
+
+// ─── scrubber ────────────────────────────────────────────────────────────────
+document.getElementById("frame-scrubber").addEventListener("input", function(){
+  showFrame(parseInt(this.value));
+});
+function updateScrubber(){
+  const sc = document.getElementById("frame-scrubber");
+  sc.max   = Math.max(0, frames.length - 1);
+  sc.value = currentIdx;
+  document.getElementById("scrubber-label").textContent =
+    frames.length ? `${currentIdx + 1} / ${frames.length}` : "0 / 0";
+}
+
 // ─── init ───────────────────────────────────────────────────────────────────
 (async function init(){
   const exps = await api("/api/experiments");
@@ -286,14 +608,24 @@ async function loadExperiment(name){
   enhancedMode = false;
   enhancedImg  = null;
   refFrameIdx  = 0;
-  frames  = await api(`/api/frames/${name}`);
-  if(!frames.length){alert("No valid images found in "+name);return;}
-  crystals  = await api(`/api/crystals/${name}`);
-  allLengths = await api(`/api/lengths/${name}`);
-  calibration = await api(`/api/calibration/${name}`) || {};
-  dropletInfo = await api(`/api/droplet/${name}`) || {};
+  showSpinner("Loading experiment…");
+  try {
+    frames  = await api(`/api/frames/${name}`);
+    if(!frames.length){ toast("No valid images found in " + name, "warn"); return; }
+    [crystals, allLengths, calibration, dropletInfo, expSettings] = await Promise.all([
+      api(`/api/crystals/${name}`),
+      api(`/api/lengths/${name}`),
+      api(`/api/calibration/${name}`).then(r=>r||{}),
+      api(`/api/droplet/${name}`).then(r=>r||{}),
+      api(`/api/settings/${name}`).then(r=>r||{}),
+    ]);
+  } finally {
+    hideSpinner();
+  }
   currentIdx = 0;
   selectedCrystalId = crystals.length > 0 ? crystals[0].id : null;
+  updateScrubber();
+  syncChartFilterOptions();
   showFrame(0);
   renderCrystals();
   renderCalibrationStatus();
@@ -306,6 +638,7 @@ async function loadExperiment(name){
 function showFrame(idx){
   if(idx<0||idx>=frames.length) return;
   currentIdx = idx;
+  updateScrubber();
   cancelMeasurement();
   enhancedMode = false;
   enhancedImg  = null;
@@ -362,9 +695,16 @@ function drawOverlays(){
     const mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
     ctx.font = "bold 12px monospace";
     ctx.fillStyle = color;
-    const label = m.direction==="h"
-      ? `${m.crystal_id} h=${m.h_px}px`
-      : `${m.crystal_id} v=${m.v_px}px`;
+    
+    let label;
+    if(calibration.pixels_per_mm){
+      // Show µm only
+      const px = m.direction==="h" ? m.h_px : m.v_px;
+      const um = (px / calibration.pixels_per_mm * 1000).toFixed(2);
+      label = m.direction==="h" ? `${m.crystal_id} ${um}µm` : `${m.crystal_id} ${um}µm`;
+    } else {
+      label = "[calibrate T]";
+    }
     ctx.fillText(label, mx+6, my-6);
   }
 
@@ -445,6 +785,7 @@ cv.addEventListener("click", async e=>{
   const f = frames[currentIdx];
 
   const meas = {
+    id:            crypto.randomUUID(),
     frame_idx:     currentIdx,
     filename:      f.filename,
     timestamp_iso: f.timestamp_iso,
@@ -461,6 +802,8 @@ cv.addEventListener("click", async e=>{
   allLengths.push(meas);
   apiPost(`/api/lengths/${expName}`, meas);
   flashSave();
+  // Show sync badge if dataset already exists
+  showSyncBadge();
 
   // If tube calibration, reload calibration data
   if(mode === "tube"){
@@ -485,7 +828,7 @@ cv.addEventListener("click", async e=>{
 
 // ─── measurement mode controls ──────────────────────────────────────────────
 function startMode(m){
-  if(m !== "tube" && !selectedCrystalId){alert("Please select a crystal first.");return;}
+  if(m !== "tube" && !selectedCrystalId){toast("Please select a crystal first.", "warn");return;}
   cancelMeasurement();
   mode = m;
   $btnH.classList.toggle("active", m==="h");
@@ -528,12 +871,12 @@ async function autoDetectDroplet(){
   $btn.disabled = true;
   try {
     const res = await api(`/api/detect_droplet/${expName}/${frames[currentIdx].filename}`);
-    if(res.error){ alert("Auto-detect failed: " + res.error); return; }
+    if(res.error){ toast("Auto-detect failed: " + res.error, "error"); return; }
     cropRegion = res;
     $btn.classList.add("active");
     drawCanvas();
   } catch(e){
-    alert("Auto-detect error: " + e);
+    toast("Auto-detect error: " + e, "error");
   } finally {
     $btn.innerHTML = origHTML;
     $btn.disabled = false;
@@ -570,7 +913,7 @@ async function toggleEnhanced(){
     $btn.classList.add("active");
     drawCanvas();
   } catch(err){
-    alert("Enhancement failed: " + err);
+    toast("Enhancement failed: " + err, "error");
   } finally {
     $btn.innerHTML = origHTML;
     $btn.disabled  = false;
@@ -584,6 +927,8 @@ function setRefFrame(){
   enhancedImg  = null;
   const $btnE = document.getElementById("btn-enhance");
   if($btnE){ $btnE.classList.remove("active"); $btnE.innerHTML='✨ Enhance <span class="hotkey">E</span>'; }
+  // Bust server-side ref cache so next enhance uses the new reference
+  fetch(`/api/reset_cache/${expName}`, {method:"POST"});
   showFrame(currentIdx);  // re-render to show REF badge
 }
 
@@ -705,7 +1050,7 @@ function renderDashboard(){
     let ratio = null;
     if(hLatest !== null && vLatest !== null){
       area = Math.PI * (hLatest / 2) * (vLatest / 2);
-      ratio = hLatest / vLatest;
+      ratio = vLatest > 0 ? hLatest / vLatest : null;
     }
 
     return `<tr>
@@ -769,18 +1114,23 @@ function renderGrowthChart(){
   const hKey  = useUm ? "h_um" : "h_px";
   const vKey  = useUm ? "v_um" : "v_px";
 
+  syncChartFilterOptions();
+
+  const filteredCrystals = chartCrystalFilter === "all"
+    ? crystals
+    : crystals.filter(c => c.id === chartCrystalFilter);
+
   const datasets = [];
 
-  crystals.forEach((crystal, ci) => {
+  filteredCrystals.forEach((crystal, ci) => {
+    const globalCi = crystals.indexOf(crystal);
     const meas = allLengths.filter(m => m.crystal_id === crystal.id);
 
-    // H points
     const hPts = meas
       .filter(m => m[hKey] != null && frames[m.frame_idx])
       .map(m => ({ x: frames[m.frame_idx].t_min / 60, y: m[hKey] }))
       .sort((a, b) => a.x - b.x);
 
-    // V points
     const vPts = meas
       .filter(m => m[vKey] != null && frames[m.frame_idx])
       .map(m => ({ x: frames[m.frame_idx].t_min / 60, y: m[vKey] }))
@@ -790,11 +1140,12 @@ function renderGrowthChart(){
       datasets.push({
         label: `${crystal.id} H`,
         data: hPts,
-        borderColor: crystalColor(ci),
-        backgroundColor: crystalColor(ci, 0.15),
+        borderColor: crystalColor(globalCi),
+        backgroundColor: crystalColor(globalCi, 0.15),
         borderWidth: 2,
-        pointRadius: 4,
-        tension: 0.2,
+        pointRadius: chartType === "scatter" ? 5 : 4,
+        tension: chartType === "scatter" ? 0 : 0.2,
+        showLine: chartType === "line",
         fill: false,
       });
     }
@@ -802,13 +1153,30 @@ function renderGrowthChart(){
       datasets.push({
         label: `${crystal.id} V`,
         data: vPts,
-        borderColor: crystalColor(ci, 0.6),
-        backgroundColor: crystalColor(ci, 0.08),
+        borderColor: crystalColor(globalCi, 0.6),
+        backgroundColor: crystalColor(globalCi, 0.08),
         borderWidth: 2,
         borderDash: [5, 3],
-        pointRadius: 4,
-        tension: 0.2,
+        pointRadius: chartType === "scatter" ? 5 : 4,
+        tension: chartType === "scatter" ? 0 : 0.2,
+        showLine: chartType === "line",
         fill: false,
+      });
+    }
+
+    // Nucleation event vertical annotation (custom draw)
+    if(crystal.nucleation_frame_idx !== null && frames[crystal.nucleation_frame_idx]){
+      const nucT = frames[crystal.nucleation_frame_idx].t_min / 60;
+      datasets.push({
+        label: `${crystal.id} nuc`,
+        data: [{x:nucT,y:0},{x:nucT,y:1e9}],
+        borderColor: crystalColor(globalCi, 0.4),
+        borderWidth: 1,
+        borderDash: [3, 3],
+        pointRadius: 0,
+        showLine: true,
+        fill: false,
+        tension: 0,
       });
     }
   });
@@ -822,10 +1190,14 @@ function renderGrowthChart(){
       maintainAspectRatio: false,
       plugins: {
         legend: {
-          labels: { color: "#8b949e", font: { size: 10 }, boxWidth: 14 },
+          labels: {
+            color: "#8b949e", font: { size: 10 }, boxWidth: 14,
+            filter: item => !item.text.endsWith(" nuc"),
+          },
           position: "top",
         },
         tooltip: {
+          filter: item => !item.dataset.label.endsWith(" nuc"),
           callbacks: {
             label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} ${unit}`,
             title: ctx => `t = ${ctx[0].parsed.x.toFixed(3)} hr`,
@@ -851,6 +1223,7 @@ function renderGrowthChart(){
   if(growthChart){
     growthChart.data.datasets = datasets;
     growthChart.options.scales.y.title.text = `Size (${unit})`;
+    growthChart.options.type = "line";
     growthChart.update();
   } else {
     const canvas = document.getElementById("growth-chart");
@@ -868,7 +1241,7 @@ async function createCrystal(){
 }
 
 async function deleteCrystal(crystalId){
-  if(crystals.length<=1){alert("Cannot delete the last crystal.");return;}
+  if(crystals.length<=1){toast("Cannot delete the last crystal.", "warn");return;}
   if(!confirm("Delete this crystal and all its measurements?")){return;}
   await api(`/api/crystals/${expName}/${crystalId}`, {method:"DELETE"});
   crystals = crystals.filter(c=>c.id!==crystalId);
@@ -903,10 +1276,15 @@ function renderCrystals(){
     const nucText = c.nucleation_frame_idx !== null
       ? `Frame ${c.nucleation_frame_idx}`
       : "Not marked";
+    const notesVal = (c.notes||"").replace(/"/g,"&quot;");
     return `<div class="crystal-item ${isSelected?'selected':''}">
-      <div onclick="selectCrystal('${c.id}')">
+      <div onclick="selectCrystal('${c.id}')" style="flex:1">
         <div class="name">${c.id}</div>
         <div class="nuc-indicator">Nucleation: ${nucText}</div>
+        <textarea class="crystal-notes" placeholder="Notes…"
+          onblur="saveCrystalNotes('${c.id}',this.value)"
+          onclick="event.stopPropagation()"
+          rows="2">${notesVal}</textarea>
       </div>
       <span class="delete-btn" onclick="deleteCrystal('${c.id}')" title="Delete">✕</span>
     </div>`;
@@ -919,24 +1297,27 @@ function renderCrystals(){
       : "Nucleation not marked";
     $bestDisplay.textContent = `${sel.id}  —  ${nucText}`;
   }
+  syncChartFilterOptions();
 }
 
 document.getElementById("btn-new-crystal").addEventListener("click", createCrystal);
+document.getElementById("chart-crystal-filter").addEventListener("change", updateChartFilter);
 
 async function exportDataset(){
-  if(!expName){ alert("No experiment loaded"); return; }
+  if(!expName){ toast("No experiment loaded.", "warn"); return; }
   const $btn = document.getElementById("btn-export-dataset");
   const origHTML = $btn.innerHTML;
   $btn.textContent = "⏳ Exporting…";
   $btn.disabled = true;
+  startExportProgressPoll();
   try {
     const res  = await fetch(`/api/export/${expName}/dataset`, {method:"POST"});
     const data = await res.json();
-    if(data.error){ alert("Export failed: " + data.error); return; }
-    const errMsg = data.errors.length ? `\n⚠ ${data.errors.length} frame(s) skipped.` : "";
-    alert(`✓ Dataset exported!\n${data.processed} frames processed.${errMsg}\n\nSaved inside experiment folder:\n  dataset/crops/\n  dataset/enhanced/\n  dataset/coco_droplets.json\n  dataset/coco_crystals.json`);
+    if(data.error){ toast("Export failed: " + data.error, "error"); return; }
+    const errMsg = data.errors.length ? ` (${data.errors.length} frame(s) skipped)` : "";
+    toast(`Dataset exported: ${data.processed} frames${errMsg}`, "success", 5000);
   } catch(e){
-    alert("Export error: " + e);
+    toast("Export error: " + e, "error");
   } finally {
     $btn.innerHTML = origHTML;
     $btn.disabled  = false;
@@ -944,7 +1325,7 @@ async function exportDataset(){
 }
 
 document.getElementById("btn-export-excel").addEventListener("click", async ()=>{
-  if(!expName){alert("No experiment loaded");return;}
+  if(!expName){toast("No experiment loaded.", "warn");return;}
   const url = `/api/export/${expName}/metrics`;
   const a = document.createElement("a");
   a.href = url;
@@ -956,7 +1337,7 @@ document.getElementById("btn-export-excel").addEventListener("click", async ()=>
 
 // ─── nucleation ─────────────────────────────────────────────────────────────
 async function markNucleation(){
-  if(!selectedCrystalId){alert("Please select a crystal first.");return;}
+  if(!selectedCrystalId){toast("Please select a crystal first.", "warn");return;}
   if(!frames.length) return;
   const f = frames[currentIdx];
   const crystal = crystals.find(c=>c.id===selectedCrystalId);
@@ -986,9 +1367,7 @@ document.addEventListener("keydown", e=>{
 
 // ─── measurements list (sidebar) ────────────────────────────────────────────
 function renderMeasurements(){
-  let frameMeas = allLengths
-    .map((m,i)=>({...m, _idx:i}))
-    .filter(m=>m.frame_idx===currentIdx);
+  let frameMeas = allLengths.filter(m=>m.frame_idx===currentIdx);
 
   if(selectedCrystalId){
     frameMeas = frameMeas.filter(m=>m.crystal_id===selectedCrystalId);
@@ -1002,31 +1381,137 @@ function renderMeasurements(){
     return;
   }
   $measList.innerHTML = frameMeas.map(m=>{
-    let val = m.direction==="h" ? `↔ ${m.h_px} px` : `↕ ${m.v_px} px`;
-    // Add µm if calibrated
-    if(calibration.pixels_per_mm){
-      const um = m.direction==="h" ? m.h_um : m.v_um;
-      if(um) val += ` = ${um} µm`;
+    const px = m.direction==="h" ? m.h_px : m.v_px;
+    let val;
+    
+    // Show µm only (calibration required)
+    if(calibration.pixels_per_mm && px){
+      const um = (px / calibration.pixels_per_mm * 1000).toFixed(2);
+      val = m.direction==="h" ? `↔ ${um} µm` : `↕ ${um} µm`;
+    } else {
+      val = `<span style="color:#f85149">[calibrate tube first]</span>`;
     }
+    
     return `<div class="meas-item ${selectedCrystalId && m.crystal_id!==selectedCrystalId?'':'for-crystal'}">
       <div class="info">
         <span class="val">${m.crystal_id}  ${val}</span>
         <span class="meta">(${m.p1.x},${m.p1.y}) → (${m.p2.x},${m.p2.y})</span>
       </div>
-      <span class="del" onclick="deleteMeas(${m._idx},'${m.crystal_id}')" title="Delete">✕</span>
+      <span class="del" onclick="deleteMeas('${m.id}','${m.crystal_id}')" title="Delete">✕</span>
     </div>`;
   }).join("");
   renderDashboard();
   renderGrowthChart();
 }
 
-async function deleteMeas(globalIdx, crystalId){
-  allLengths.splice(globalIdx, 1);
-  await api(`/api/lengths/${expName}/${crystalId}/${
-    allLengths.filter(m=>m.crystal_id===crystalId).length}`, {method:"DELETE"});
+function deleteMeas(measId, crystalId){
+  const idx = allLengths.findIndex(m => m.id === measId);
+  if(idx === -1) return;
+  const removed = allLengths.splice(idx, 1)[0];
   flashSave();
   drawCanvas();
   renderMeasurements();
+  showSyncBadge();
+
+  // Soft-delete: allow undo for 5s before committing to server
+  toast("Measurement deleted", "info", 5000, ()=>{
+    // Undo: re-insert at original position
+    allLengths.splice(idx, 0, removed);
+    clearTimeout(_pendingDeletes[measId]);
+    delete _pendingDeletes[measId];
+    flashSave();
+    drawCanvas();
+    renderMeasurements();
+  });
+  const tid = setTimeout(()=>{
+    delete _pendingDeletes[measId];
+    api(`/api/lengths/${expName}/${crystalId}/${measId}`, {method:"DELETE"});
+  }, 5000);
+  _pendingDeletes[measId] = tid;
+}
+
+// ─── undo & reset functions ─────────────────────────────────────────────────
+function undoLastMeasurement(){
+  // Find last non-special measurement
+  let lastIdx = -1;
+  for(let i = allLengths.length - 1; i >= 0; i--){
+    const cid = allLengths[i].crystal_id;
+    if(cid !== "__TUBE_WIDTH__" && cid !== "__DROPLET_HEIGHT__"){
+      lastIdx = i; break;
+    }
+  }
+  if(lastIdx === -1){ toast("No measurements to undo.", "info"); return; }
+  const removed = allLengths.splice(lastIdx, 1)[0];
+  flashSave();
+  drawCanvas();
+  renderMeasurements();
+  showSyncBadge();
+
+  toast("Measurement undone", "info", 5000, ()=>{
+    allLengths.splice(lastIdx, 0, removed);
+    clearTimeout(_pendingDeletes[removed.id]);
+    delete _pendingDeletes[removed.id];
+    flashSave();
+    drawCanvas();
+    renderMeasurements();
+  });
+  const tid = setTimeout(()=>{
+    delete _pendingDeletes[removed.id];
+    api(`/api/lengths/${expName}/${removed.crystal_id}/${removed.id}`, {method:"DELETE"});
+  }, 5000);
+  _pendingDeletes[removed.id] = tid;
+}
+
+function clearCurrentFrame(){
+  const frameMeas = allLengths.filter(m=>
+    m.frame_idx===currentIdx &&
+    m.crystal_id!=="__TUBE_WIDTH__" &&
+    m.crystal_id!=="__DROPLET_HEIGHT__"
+  );
+  if(!frameMeas.length){ toast("No measurements on this frame.", "info"); return; }
+  if(!confirm(`Delete all ${frameMeas.length} measurement(s) on this frame?`)) return;
+
+  // Capture before splicing
+  const toDelete = frameMeas.map(m=>({id:m.id, crystal_id:m.crystal_id}));
+  allLengths = allLengths.filter(m=>!toDelete.some(d=>d.id===m.id));
+  flashSave();
+  drawCanvas();
+  renderMeasurements();
+  showSyncBadge();
+  // Fire all deletes in parallel immediately (no undo for bulk clear)
+  Promise.all(toDelete.map(d=>
+    api(`/api/lengths/${expName}/${d.crystal_id}/${d.id}`, {method:"DELETE"})
+  ));
+}
+
+async function resetNucleation(){
+  if(!selectedCrystalId){
+    toast("No crystal selected.", "warn");
+    return;
+  }
+
+  const crystal = crystals.find(c=>c.id===selectedCrystalId);
+  if(!crystal || crystal.nucleation_frame_idx === null){
+    toast("This crystal has no nucleation marker set.", "info");
+    return;
+  }
+
+  if(!confirm(`Reset nucleation marker for ${selectedCrystalId}?`)){
+    return;
+  }
+  
+  await apiPut(`/api/crystals/${expName}/${selectedCrystalId}/nucleation`, {
+    nucleation_frame_idx: null,
+    nucleation_timestamp_iso: null
+  });
+  
+  crystal.nucleation_frame_idx = null;
+  crystal.nucleation_timestamp_iso = null;
+  
+  flashSave();
+  drawCanvas();
+  renderCrystals();
+  renderDashboard();
 }
 
 // ─── navigation ─────────────────────────────────────────────────────────────
@@ -1038,6 +1523,19 @@ document.addEventListener("keydown", e=>{
   // ignore when typing in an input
   if(e.target.tagName==="INPUT" || e.target.tagName==="SELECT") return;
 
+  // Ctrl+Z for undo
+  if(e.ctrlKey && e.key==="z"){
+    e.preventDefault(); undoLastMeasurement(); return;
+  }
+  // Ctrl+Shift+X for clear frame
+  if(e.ctrlKey && e.shiftKey && e.key==="X"){
+    e.preventDefault(); clearCurrentFrame(); return;
+  }
+  // Ctrl+N for reset nucleation
+  if(e.ctrlKey && e.key==="n"){
+    e.preventDefault(); resetNucleation(); return;
+  }
+
   switch(e.key){
     case "ArrowLeft":  e.preventDefault(); showFrame(currentIdx-1); break;
     case "ArrowRight": e.preventDefault(); showFrame(currentIdx+1); break;
@@ -1048,9 +1546,31 @@ document.addEventListener("keydown", e=>{
     case "a": case "A": e.preventDefault(); autoDetectDroplet(); break;
     case "e": case "E": e.preventDefault(); toggleEnhanced(); break;
     case "r": case "R": e.preventDefault(); setRefFrame(); break;
-    case "Escape":     e.preventDefault(); cancelMeasurement(); break;
+    case "s": case "S": e.preventDefault(); openSettings(); break;
+    case "?":           e.preventDefault(); toggleHelpModal(); break;
+    case "Escape":     e.preventDefault();
+      cancelMeasurement();
+      document.querySelectorAll(".modal-backdrop.open").forEach(m=>m.classList.remove("open"));
+      break;
   }
 });
+
+// ─── sync badge ──────────────────────────────────────────────────────────────
+function showSyncBadge(){
+  const badge = document.getElementById("sync-badge");
+  if(!badge) return;
+  badge.style.display = "inline";
+  badge.textContent = "✓ synced";
+  clearTimeout(badge._tid);
+  badge._tid = setTimeout(()=>{ badge.style.display="none"; }, 3000);
+}
+
+// ─── crystal notes ───────────────────────────────────────────────────────────
+async function saveCrystalNotes(crystalId, notes){
+  const crystal = crystals.find(c=>c.id===crystalId);
+  if(crystal) crystal.notes = notes;
+  await apiPatch(`/api/crystals/${expName}/${crystalId}`, {notes});
+}
 
 // ─── fetch helpers ──────────────────────────────────────────────────────────
 async function api(url, opts={}){
@@ -1063,6 +1583,10 @@ async function apiPost(url, body){
 }
 async function apiPut(url, body){
   return fetch(url,{method:"PUT",headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify(body)});
+}
+async function apiPatch(url, body){
+  return fetch(url,{method:"PATCH",headers:{"Content-Type":"application/json"},
                     body:JSON.stringify(body)});
 }
 
