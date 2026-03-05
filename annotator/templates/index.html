@@ -1121,6 +1121,7 @@ function renderGrowthChart(){
     : crystals.filter(c => c.id === chartCrystalFilter);
 
   const datasets = [];
+  let maxY = 0;   // track actual max to cap nucleation lines
 
   filteredCrystals.forEach((crystal, ci) => {
     const globalCi = crystals.indexOf(crystal);
@@ -1135,6 +1136,10 @@ function renderGrowthChart(){
       .filter(m => m[vKey] != null && frames[m.frame_idx])
       .map(m => ({ x: frames[m.frame_idx].t_min / 60, y: m[vKey] }))
       .sort((a, b) => a.x - b.x);
+
+    // Update maxY from real data points
+    hPts.forEach(p => { if(p.y > maxY) maxY = p.y; });
+    vPts.forEach(p => { if(p.y > maxY) maxY = p.y; });
 
     if(hPts.length){
       datasets.push({
@@ -1163,13 +1168,17 @@ function renderGrowthChart(){
         fill: false,
       });
     }
+  });
 
-    // Nucleation event vertical annotation (custom draw)
+  // Add nucleation vertical lines AFTER computing maxY from real data
+  const nucTop = maxY > 0 ? maxY * 1.15 : 100;
+  filteredCrystals.forEach((crystal, ci) => {
+    const globalCi = crystals.indexOf(crystal);
     if(crystal.nucleation_frame_idx !== null && frames[crystal.nucleation_frame_idx]){
       const nucT = frames[crystal.nucleation_frame_idx].t_min / 60;
       datasets.push({
         label: `${crystal.id} nuc`,
-        data: [{x:nucT,y:0},{x:nucT,y:1e9}],
+        data: [{x:nucT,y:0},{x:nucT,y:nucTop}],
         borderColor: crystalColor(globalCi, 0.4),
         borderWidth: 1,
         borderDash: [3, 3],
