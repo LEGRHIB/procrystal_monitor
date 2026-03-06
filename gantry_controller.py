@@ -10,7 +10,7 @@ Modes:
   --scan         Scan all positions, capture one image per droplet
   --monitor      Continuous scanning at interval (like autocapture + gantry)
 
-The bed stays at Z=300 (fully lowered). Only XY moves.
+The bed stays at Z=0 (fully lowered on Ender 5 Pro). Only XY moves.
 Images are stored so app.py can read them directly for annotation.
 
 Folder structure created per experiment:
@@ -63,7 +63,7 @@ ONEDRIVE_EXPERIMENTS = (
 
 # Ender 5 Pro defaults
 DEFAULT_BAUD = 115200
-Z_HOME = 300.0          # Bed fully lowered — fixed, no autofocus
+Z_HOME = 0.0            # Bed fully lowered — Ender 5 Pro: Z=0 is bed DOWN
 XY_SPEED = 3000         # mm/min
 Z_SPEED = 1000          # mm/min
 SETTLE_TIME = 0.5       # seconds after move before capture
@@ -177,15 +177,12 @@ class GantryController:
         return ""
 
     def home(self):
-        """Home all axes, then move bed to Z=300 (fully down)."""
-        print("  Homing all axes...")
-        self._send("G28", timeout=60)
-        print("  Moving bed to Z=300 (fully down)...")
+        """Home XY only. Z is set manually once — never touch it again."""
+        print("  Homing X and Y only (Z stays where it is)...")
+        self._send("G28 X Y", timeout=60)
         self._send("G90")  # absolute positioning
-        self._send(f"G1 Z{Z_HOME} F{Z_SPEED}")
         self._send("M400")  # wait for move to complete
-        self.current_z = Z_HOME
-        print("  Homed. Bed at Z=300.")
+        print("  Homed. X=0 Y=0. Z untouched.")
 
     def move_to(self, x: float, y: float, speed: int = XY_SPEED):
         """Move to absolute XY position. Z stays fixed."""
