@@ -66,7 +66,7 @@ DEFAULT_BAUD = 115200
 Z_HOME = 0.0            # Bed fully lowered — Ender 5 Pro: Z=0 is bed DOWN
 XY_SPEED = 3000         # mm/min
 Z_SPEED = 1000          # mm/min
-SETTLE_TIME = 0.5       # seconds after move before capture
+SETTLE_TIME = 2.0       # seconds after move before capture
 CAMERA_INDEX = 0
 WARMUP_FRAMES = 5       # discard first N frames (auto-exposure)
 
@@ -545,7 +545,7 @@ def run_scan(args):
 
         # Move gantry
         gantry.move_to(x, y)
-        time.sleep(SETTLE_TIME)
+        time.sleep(args.settle)
 
         # Capture
         frame = camera.capture()
@@ -660,7 +660,7 @@ def run_monitor(args):
             x, y = pos["x"], pos["y"]
 
             gantry.move_to(x, y)
-            time.sleep(SETTLE_TIME)
+            time.sleep(args.settle)
 
             frame = camera.capture()
             if frame is not None:
@@ -754,6 +754,8 @@ Examples:
                    help='Output file for calibration (default: positions.json)')
 
     # Monitor settings
+    p.add_argument('--settle', type=float, default=SETTLE_TIME,
+                   help=f'Seconds to wait after move before capture (default: {SETTLE_TIME})')
     p.add_argument('--interval', type=float, default=1800,
                    help='Seconds between sweeps for monitor mode (default: 1800)')
     p.add_argument('--duration', type=float, default=None,
