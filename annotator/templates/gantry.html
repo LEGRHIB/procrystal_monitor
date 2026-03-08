@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Gantry Controller</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     background:#0d1117;color:#c9d1d9;display:flex;flex-direction:column;height:100vh}
+
+/* top bar */
+#topbar{display:flex;align-items:center;gap:14px;padding:8px 14px;
+        background:#161b22;border-bottom:1px solid #30363d;flex-shrink:0}
+#topbar a{color:#58a6ff;text-decoration:none;font-size:13px}
+#topbar a:hover{text-decoration:underline}
+#topbar h1{font-size:16px;font-weight:600;color:#e6edf3}
+.spacer{flex:1}
+
+/* main layout */
+#main{display:flex;flex:1;overflow:hidden}
+
+/* left: camera feed */
+#feed-panel{flex:1;display:flex;align-items:center;justify-content:center;
+            background:#010409;position:relative;overflow:hidden}
+#feed-panel img{max-width:100%;max-height:100%;object-fit:contain}
+#feed-placeholder{color:#484f58;font-size:18px;text-align:center}
+
+/* right: controls */
+#controls{width:360px;padding:16px;overflow-y:auto;border-left:1px solid #30363d;
+          background:#0d1117;display:flex;flex-direction:column;gap:16px}
+
+/* sections */
+.section{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px}
+.section h3{font-size:13px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;
+            margin-bottom:10px}
+
+/* buttons */
+.btn{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;
+     padding:6px 14px;cursor:pointer;font-size:13px;transition:background 0.15s}
+.btn:hover{background:#30363d}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+.btn.primary{background:#238636;border-color:#2ea043;color:#fff}
+.btn.primary:hover{background:#2ea043}
+.btn.danger{background:#da3633;border-color:#f85149;color:#fff}
+.btn.danger:hover{background:#f85149}
+.btn.active{background:#1f6feb;border-color:#388bfd;color:#fff}
+
+/* connection */
+#conn-status{font-size:12px;padding:4px 8px;border-radius:4px;display:inline-block}
+.connected{background:#0d2818;color:#3fb950}
+.disconnected{background:#2d1214;color:#f85149}
+
+/* jog pad */
+.jog-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;max-width:200px;margin:0 auto}
+.jog-grid .btn{padding:12px;font-size:16px;font-weight:700}
+.jog-grid .center{font-size:11px;color:#8b949e;display:flex;align-items:center;justify-content:center}
+
+/* position display */
+#pos-display{font-family:monospace;font-size:14px;text-align:center;margin:6px 0;color:#58a6ff}
+
+/* step control */
+.step-row{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:6px}
+.step-row input{width:70px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+                border-radius:4px;padding:4px;text-align:center;font-size:13px}
+.step-row label{font-size:12px;color:#8b949e}
+
+/* positions list */
+#positions-list{max-height:200px;overflow-y:auto;margin-top:8px}
+.pos-item{display:flex;align-items:center;justify-content:space-between;
+          padding:6px 8px;background:#0d1117;border-radius:4px;margin-bottom:4px;
+          font-size:12px;font-family:monospace;cursor:pointer}
+.pos-item:hover{background:#1c2128}
+.pos-item .pos-name{color:#58a6ff;font-weight:600}
+.pos-item .pos-coords{color:#8b949e}
+.pos-item .pos-actions{display:flex;gap:4px}
+.pos-item .pos-actions button{background:none;border:none;color:#8b949e;cursor:pointer;
+                              font-size:14px;padding:2px 4px}
+.pos-item .pos-actions button:hover{color:#f85149}
+
+/* monitor log */
+#monitor-log{max-height:150px;overflow-y:auto;font-family:monospace;font-size:11px;
+             background:#0d1117;border-radius:4px;padding:8px;margin-top:8px;color:#8b949e}
+#monitor-log div{margin-bottom:2px}
+
+/* scan/monitor inputs */
+.form-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.form-row label{font-size:12px;color:#8b949e;min-width:70px}
+.form-row input{flex:1;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+                border-radius:4px;padding:4px 8px;font-size:13px}
+.form-row select{flex:1;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+                 border-radius:4px;padding:4px 8px;font-size:13px}
+
+/* toast */
+#toast-container{position:fixed;top:16px;right:16px;z-index:9999;display:flex;
+                 flex-direction:column;gap:8px}
+.toast{padding:10px 16px;border-radius:6px;font-size:13px;animation:fadeIn 0.2s;
+       max-width:350px;box-shadow:0 4px 12px rgba(0,0,0,0.4)}
+.toast.success{background:#0d2818;color:#3fb950;border:1px solid #238636}
+.toast.error{background:#2d1214;color:#f85149;border:1px solid #da3633}
+.toast.info{background:#0c2d6b;color:#58a6ff;border:1px solid #1f6feb}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+
+<!-- top bar -->
+<div id="topbar">
+  <h1>Gantry Controller</h1>
+  <span id="conn-status" class="disconnected">Disconnected</span>
+  <div class="spacer"></div>
+  <a href="/">Annotator</a>
+</div>
+
+<!-- main layout -->
+<div id="main">
+  <!-- camera feed -->
+  <div id="feed-panel">
+    <div id="feed-placeholder">Camera not connected.<br>Connect gantry & open camera to start.</div>
+    <img id="feed-img" style="display:none" alt="Live feed"/>
+  </div>
+
+  <!-- right controls -->
+  <div id="controls">
+
+    <!-- connection -->
+    <div class="section">
+      <h3>Connection</h3>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <select id="port-select" style="flex:1;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+                border-radius:4px;padding:4px 8px;font-size:13px">
+          <option value="auto">Auto-detect</option>
+        </select>
+        <button class="btn" onclick="refreshPorts()">Refresh</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn primary" id="btn-connect" onclick="connectGantry()">Connect</button>
+        <button class="btn danger" id="btn-disconnect" onclick="disconnectGantry()" disabled>Disconnect</button>
+        <button class="btn" id="btn-home" onclick="homeGantry()" disabled>Home XY</button>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button class="btn" id="btn-cam-open" onclick="openCamera()">Open Camera</button>
+        <button class="btn" id="btn-cam-close" onclick="closeCamera()" disabled>Close Camera</button>
+      </div>
+    </div>
+
+    <!-- jog controls -->
+    <div class="section">
+      <h3>Jog Controls</h3>
+      <div id="pos-display">X=0.0  Y=0.0</div>
+      <div class="jog-grid">
+        <div></div>
+        <button class="btn" onclick="jog('y+')" title="Y+  [W]">W<br><small>Y+</small></button>
+        <div></div>
+        <button class="btn" onclick="jog('x-')" title="X-  [A]">A<br><small>X-</small></button>
+        <div class="center">WASD</div>
+        <button class="btn" onclick="jog('x+')" title="X+  [D]">D<br><small>X+</small></button>
+        <div></div>
+        <button class="btn" onclick="jog('y-')" title="Y-  [S]">S<br><small>Y-</small></button>
+        <div></div>
+      </div>
+      <div class="step-row">
+        <button class="btn" onclick="changeStep(0.5)" title="Halve step [-]">-</button>
+        <label>Step:</label>
+        <input type="number" id="step-input" value="5.0" min="0.1" max="50" step="0.1"
+               onchange="setStep(this.value)"/>
+        <label>mm</label>
+        <button class="btn" onclick="changeStep(2)" title="Double step [+]">+</button>
+      </div>
+    </div>
+
+    <!-- mark positions -->
+    <div class="section">
+      <h3>Droplet Positions <span id="pos-count" style="color:#58a6ff">(0)</span></h3>
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+        <button class="btn primary" onclick="markPosition()" title="Mark position [SPACE]">
+          Mark Position
+        </button>
+        <button class="btn" onclick="clearPositions()">Clear All</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+        <button class="btn" onclick="savePositions()">Save to File</button>
+        <button class="btn" onclick="loadPositions()">Load from File</button>
+      </div>
+      <div id="positions-list"></div>
+    </div>
+
+    <!-- scan & monitor -->
+    <div class="section">
+      <h3>Scan & Monitor</h3>
+      <div class="form-row">
+        <label>Exp Name:</label>
+        <input type="text" id="exp-name" placeholder="auto-generated"/>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <button class="btn primary" onclick="runScan()">Single Scan</button>
+      </div>
+      <hr style="border-color:#30363d;margin:10px 0"/>
+      <div class="form-row">
+        <label>Interval:</label>
+        <input type="number" id="mon-interval" value="1800" min="10" step="1"/>
+        <label>sec</label>
+      </div>
+      <div class="form-row">
+        <label>Duration:</label>
+        <input type="number" id="mon-duration" placeholder="unlimited" min="0.1" step="0.1"/>
+        <label>hours</label>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn primary" id="btn-mon-start" onclick="startMonitor()">Start Monitor</button>
+        <button class="btn danger" id="btn-mon-stop" onclick="stopMonitor()" disabled>Stop Monitor</button>
+      </div>
+      <div id="monitor-log"></div>
+    </div>
+
+  </div><!-- /controls -->
+</div><!-- /main -->
+
+<div id="toast-container"></div>
+
+<script>
+// ── helpers ──────────────────────────────────────────────────────────────────
+async function api(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+async function apiPost(url, body={}) {
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  return r.json();
+}
+async function apiDelete(url) {
+  const r = await fetch(url, {method:'DELETE'});
+  return r.json();
+}
+
+function toast(msg, type='info', duration=3000) {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), duration);
+}
+
+// ── state ────────────────────────────────────────────────────────────────────
+let connected = false;
+let cameraOpen = false;
+let step = 5.0;
+let positions = [];
+let monitorPollId = null;
+
+const $pos = document.getElementById('pos-display');
+const $connStatus = document.getElementById('conn-status');
+const $feedImg = document.getElementById('feed-img');
+const $feedPlaceholder = document.getElementById('feed-placeholder');
+
+function updateUI(status) {
+  connected = status.connected;
+  cameraOpen = status.camera_ok;
+  step = status.step;
+  positions = status.positions || [];
+
+  $pos.textContent = `X=${status.x.toFixed(1)}  Y=${status.y.toFixed(1)}`;
+  $connStatus.textContent = connected ? `Connected (${status.port})` : 'Disconnected';
+  $connStatus.className = connected ? 'connected' : 'disconnected';
+
+  document.getElementById('btn-connect').disabled = connected;
+  document.getElementById('btn-disconnect').disabled = !connected;
+  document.getElementById('btn-home').disabled = !connected;
+  document.getElementById('btn-cam-close').disabled = !cameraOpen;
+  document.getElementById('step-input').value = step;
+
+  document.getElementById('btn-mon-start').disabled = status.monitor_running;
+  document.getElementById('btn-mon-stop').disabled = !status.monitor_running;
+
+  renderPositions();
+
+  if (status.monitor_log && status.monitor_log.length) {
+    const log = document.getElementById('monitor-log');
+    log.innerHTML = status.monitor_log.map(l => `<div>${l}</div>`).join('');
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+// ── connection ───────────────────────────────────────────────────────────────
+async function refreshPorts() {
+  const res = await api('/api/gantry/ports');
+  const sel = document.getElementById('port-select');
+  sel.innerHTML = '<option value="auto">Auto-detect</option>';
+  for (const p of (res.ports || [])) {
+    const opt = document.createElement('option');
+    opt.value = p.device;
+    opt.textContent = `${p.device} — ${p.description}`;
+    sel.appendChild(opt);
+  }
+  if (res.auto) toast(`Auto-detected: ${res.auto}`, 'info');
+}
+
+async function connectGantry() {
+  const port = document.getElementById('port-select').value;
+  document.getElementById('btn-connect').disabled = true;
+  document.getElementById('btn-connect').textContent = 'Connecting…';
+  try {
+    const res = await apiPost('/api/gantry/connect', {port});
+    if (res.error) { toast(res.error, 'error'); return; }
+    toast(`Connected to ${res.port}`, 'success');
+    await refreshStatus();
+  } catch(e) { toast('Connection failed: ' + e, 'error'); }
+  finally {
+    document.getElementById('btn-connect').textContent = 'Connect';
+    document.getElementById('btn-connect').disabled = connected;
+  }
+}
+
+async function disconnectGantry() {
+  await apiPost('/api/gantry/disconnect');
+  stopStream();
+  toast('Disconnected', 'info');
+  await refreshStatus();
+}
+
+async function homeGantry() {
+  document.getElementById('btn-home').disabled = true;
+  document.getElementById('btn-home').textContent = 'Homing…';
+  try {
+    const res = await apiPost('/api/gantry/home');
+    if (res.error) { toast(res.error, 'error'); return; }
+    toast('Homed to X=0 Y=0', 'success');
+    await refreshStatus();
+  } finally {
+    document.getElementById('btn-home').textContent = 'Home XY';
+    document.getElementById('btn-home').disabled = !connected;
+  }
+}
+
+// ── camera ───────────────────────────────────────────────────────────────────
+async function openCamera() {
+  const res = await apiPost('/api/gantry/camera/open');
+  if (res.error) { toast(res.error, 'error'); return; }
+  toast(`Camera opened (${res.width}x${res.height})`, 'success');
+  cameraOpen = true;
+  document.getElementById('btn-cam-close').disabled = false;
+  startStream();
+}
+
+async function closeCamera() {
+  stopStream();
+  await apiPost('/api/gantry/camera/close');
+  cameraOpen = false;
+  document.getElementById('btn-cam-close').disabled = true;
+  $feedImg.style.display = 'none';
+  $feedPlaceholder.style.display = '';
+  toast('Camera closed', 'info');
+}
+
+function startStream() {
+  $feedPlaceholder.style.display = 'none';
+  $feedImg.style.display = '';
+  $feedImg.src = '/api/gantry/camera/stream?' + Date.now();
+}
+
+function stopStream() {
+  $feedImg.src = '';
+  $feedImg.style.display = 'none';
+  $feedPlaceholder.style.display = '';
+}
+
+// ── jog ──────────────────────────────────────────────────────────────────────
+async function jog(direction) {
+  if (!connected) { toast('Not connected', 'error'); return; }
+  const res = await apiPost('/api/gantry/jog', {direction, step});
+  if (res.error) { toast(res.error, 'error'); return; }
+  $pos.textContent = `X=${res.x.toFixed(1)}  Y=${res.y.toFixed(1)}`;
+}
+
+function changeStep(factor) {
+  step = Math.max(0.1, Math.min(50, step * factor));
+  step = Math.round(step * 10) / 10;
+  document.getElementById('step-input').value = step;
+  apiPost('/api/gantry/step', {step});
+}
+
+function setStep(val) {
+  step = Math.max(0.1, Math.min(50, parseFloat(val) || 5));
+  apiPost('/api/gantry/step', {step});
+}
+
+// ── positions ────────────────────────────────────────────────────────────────
+async function markPosition() {
+  const res = await apiPost('/api/gantry/mark');
+  if (res.error) { toast(res.error, 'error'); return; }
+  toast(`Marked: ${res.position.id} at X=${res.position.x}, Y=${res.position.y}`, 'success');
+  await refreshStatus();
+}
+
+function renderPositions() {
+  const list = document.getElementById('positions-list');
+  document.getElementById('pos-count').textContent = `(${positions.length})`;
+  if (!positions.length) {
+    list.innerHTML = '<div style="color:#484f58;font-size:12px;padding:8px">No positions marked yet.</div>';
+    return;
+  }
+  list.innerHTML = positions.map(p => `
+    <div class="pos-item" onclick="gotoPosition('${p.id}')">
+      <span class="pos-name">${p.id}</span>
+      <span class="pos-coords">X=${p.x} Y=${p.y}</span>
+      <span class="pos-actions">
+        <button onclick="event.stopPropagation();removePosition('${p.id}')" title="Remove">✕</button>
+      </span>
+    </div>
+  `).join('');
+}
+
+async function removePosition(id) {
+  await apiDelete(`/api/gantry/positions/${id}`);
+  await refreshStatus();
+}
+
+async function clearPositions() {
+  if (!positions.length) return;
+  await apiDelete('/api/gantry/positions');
+  toast('All positions cleared', 'info');
+  await refreshStatus();
+}
+
+async function gotoPosition(id) {
+  if (!connected) { toast('Not connected', 'error'); return; }
+  const res = await apiPost(`/api/gantry/goto/${id}`);
+  if (res.error) { toast(res.error, 'error'); return; }
+  $pos.textContent = `X=${res.x.toFixed(1)}  Y=${res.y.toFixed(1)}`;
+  toast(`Moved to ${id}`, 'success');
+}
+
+async function savePositions() {
+  const res = await apiPost('/api/gantry/positions/save', {path: 'positions.json'});
+  if (res.error) { toast(res.error, 'error'); return; }
+  toast(`Saved ${res.count} positions to ${res.path}`, 'success');
+}
+
+async function loadPositions() {
+  const res = await apiPost('/api/gantry/positions/load', {path: 'positions.json'});
+  if (res.error) { toast(res.error, 'error'); return; }
+  toast(`Loaded ${res.count} positions`, 'success');
+  await refreshStatus();
+}
+
+// ── scan & monitor ───────────────────────────────────────────────────────────
+async function runScan() {
+  if (!connected) { toast('Not connected', 'error'); return; }
+  if (!cameraOpen) { toast('Open camera first', 'error'); return; }
+  if (!positions.length) { toast('No positions marked', 'error'); return; }
+
+  const name = document.getElementById('exp-name').value || undefined;
+  const btn = document.querySelector('[onclick="runScan()"]');
+  btn.disabled = true;
+  btn.textContent = 'Scanning…';
+  try {
+    const res = await apiPost('/api/gantry/scan', {name});
+    if (res.error) { toast(res.error, 'error'); return; }
+    toast(`Scan complete: ${res.captured} captured, ${res.failed} failed. Exp: ${res.experiment}`, 'success', 5000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Single Scan';
+  }
+}
+
+async function startMonitor() {
+  if (!connected) { toast('Not connected', 'error'); return; }
+  if (!cameraOpen) { toast('Open camera first', 'error'); return; }
+  if (!positions.length) { toast('No positions marked', 'error'); return; }
+
+  const name = document.getElementById('exp-name').value || undefined;
+  const interval = parseFloat(document.getElementById('mon-interval').value) || 1800;
+  const durVal = document.getElementById('mon-duration').value;
+  const duration = durVal ? parseFloat(durVal) : undefined;
+
+  const res = await apiPost('/api/gantry/monitor/start', {name, interval, duration});
+  if (res.error) { toast(res.error, 'error'); return; }
+  toast(`Monitor started: ${res.experiment}`, 'success');
+
+  document.getElementById('btn-mon-start').disabled = true;
+  document.getElementById('btn-mon-stop').disabled = false;
+
+  // Poll log
+  monitorPollId = setInterval(async () => {
+    const s = await api('/api/gantry/status');
+    if (s.monitor_log) {
+      const log = document.getElementById('monitor-log');
+      log.innerHTML = s.monitor_log.map(l => `<div>${l}</div>`).join('');
+      log.scrollTop = log.scrollHeight;
+    }
+    if (!s.monitor_running) {
+      clearInterval(monitorPollId);
+      monitorPollId = null;
+      document.getElementById('btn-mon-start').disabled = false;
+      document.getElementById('btn-mon-stop').disabled = true;
+      toast('Monitor stopped', 'info');
+    }
+  }, 2000);
+}
+
+async function stopMonitor() {
+  await apiPost('/api/gantry/monitor/stop');
+  toast('Stopping monitor…', 'info');
+}
+
+// ── keyboard shortcuts ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  // Skip if typing in an input
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+  switch(e.key.toLowerCase()) {
+    case 'w': e.preventDefault(); jog('y+'); break;
+    case 's': e.preventDefault(); jog('y-'); break;
+    case 'a': e.preventDefault(); jog('x-'); break;
+    case 'd': e.preventDefault(); jog('x+'); break;
+    case ' ': e.preventDefault(); markPosition(); break;
+    case '+': case '=': e.preventDefault(); changeStep(2); break;
+    case '-': e.preventDefault(); changeStep(0.5); break;
+  }
+});
+
+// ── init ─────────────────────────────────────────────────────────────────────
+async function refreshStatus() {
+  try {
+    const s = await api('/api/gantry/status');
+    updateUI(s);
+    // If camera is open and feed not showing, start stream
+    if (s.camera_ok && $feedImg.style.display === 'none') {
+      startStream();
+    }
+  } catch(e) { console.error('Status refresh failed', e); }
+}
+
+refreshPorts();
+refreshStatus();
+</script>
+</body>
+</html>

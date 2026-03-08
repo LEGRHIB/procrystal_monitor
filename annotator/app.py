@@ -16,10 +16,13 @@ import json
 import math
 import os
 import re
+import signal
+import time
 import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, List, Dict
 
 try:
     from openpyxl import Workbook
@@ -35,7 +38,16 @@ try:
 except ImportError:
     HAS_CV2 = False
 
-from flask import Flask, jsonify, render_template, request, send_file, abort
+try:
+    import serial
+    import serial.tools.list_ports
+    HAS_SERIAL = True
+except ImportError:
+    HAS_SERIAL = False
+
+import glob as globmod  # renamed to avoid clash with flask
+
+from flask import Flask, jsonify, render_template, request, send_file, abort, Response
 
 # ─── configuration ───────────────────────────────────────────────────────────
 
@@ -328,13 +340,20 @@ def scan_experiment(exp_path: Path) -> list[dict]:
 
 
 def list_experiments() -> list[str]:
-    """Return folder names that contain a raw_images/ subdirectory."""
+    """Return folder names that contain a raw_images/ subdirectory.
+    Supports both flat (exp/raw_images/) and nested (exp/droplet_001/raw_images/)."""
     if not DATA_ROOT.is_dir():
         return []
     exps = []
     for d in sorted(DATA_ROOT.iterdir()):
-        if d.is_dir() and (d / "raw_images").is_dir():
+        if not d.is_dir():
+            continue
+        if (d / "raw_images").is_dir():
             exps.append(d.name)
+        # Also check one level deeper for grouped experiments (gantry droplets)
+        for sub in sorted(d.iterdir()):
+            if sub.is_dir() and (sub / "raw_images").is_dir():
+                exps.append(f"{d.name}/{sub.name}")
     return exps
 
 
@@ -690,7 +709,7 @@ def api_experiments():
     return jsonify(list_experiments())
 
 
-@app.get("/api/frames/<exp_name>")
+@app.get("/api/frames/<path:exp_name>")
 def api_frames(exp_name: str):
     exp_path = DATA_ROOT / exp_name
     if not exp_path.is_dir():
@@ -699,7 +718,7 @@ def api_frames(exp_name: str):
     return jsonify(frames)
 
 
-@app.get("/api/image/<exp_name>/<filename>")
+@app.get("/api/image/<path:exp_name>/<filename>")
 def api_image(exp_name: str, filename: str):
     img_path = DATA_ROOT / exp_name / "raw_images" / filename
     if not img_path.is_file():
@@ -707,21 +726,21 @@ def api_image(exp_name: str, filename: str):
     return send_file(img_path, mimetype="image/png")
 
 
-@app.get("/api/calibration/<exp_name>")
+@app.get("/api/calibration/<path:exp_name>")
 def api_get_calibration(exp_name: str):
     """Get calibration (pixels_per_mm) extracted from __TUBE_WIDTH__ measurement."""
     cal = get_tube_width_calibration(exp_name)
     return jsonify(cal)
 
 
-@app.get("/api/droplet/<exp_name>")
+@app.get("/api/droplet/<path:exp_name>")
 def api_get_droplet(exp_name: str):
     """Get droplet height and volume data."""
     droplet = get_droplet_height(exp_name)
     return jsonify(droplet)
 
 
-@app.get("/api/detect_droplet/<exp_name>/<filename>")
+@app.get("/api/detect_droplet/<path:exp_name>/<filename>")
 def api_detect_droplet(exp_name: str, filename: str):
     """Auto-detect droplet bounding box. Returns {x, y, w, h} in original image pixels."""
     if not HAS_CV2:
@@ -755,7 +774,7 @@ def api_detect_droplet(exp_name: str, filename: str):
     })
 
 
-@app.get("/api/enhanced_crop/<exp_name>/<filename>")
+@app.get("/api/enhanced_crop/<path:exp_name>/<filename>")
 def api_enhanced_crop(exp_name: str, filename: str):
     """Return a temporally-enhanced PNG for the given crop region.
     Query params: x, y, w, h (in original image pixels); ref=<filename> (reference frame)."""
@@ -811,7 +830,7 @@ def api_enhanced_crop(exp_name: str, filename: str):
     return send_file(io.BytesIO(buf.tobytes()), mimetype="image/png")
 
 
-@app.post("/api/export/<exp_name>/dataset")
+@app.post("/api/export/<path:exp_name>/dataset")
 def api_export_dataset(exp_name: str):
     """Batch-export crops, CLAHE-enhanced images, and COCO JSON into <exp>/dataset/."""
     if not HAS_CV2:
@@ -926,7 +945,7 @@ def api_export_dataset(exp_name: str):
     })
 
 
-@app.get("/api/export/<exp_name>/metrics")
+@app.get("/api/export/<path:exp_name>/metrics")
 def api_export_metrics(exp_name: str):
     """Export dashboard metrics as Excel file and save a copy to results/."""
     if not HAS_OPENPYXL:
@@ -974,14 +993,14 @@ def save_crystals(exp_name: str, data: dict):
     cf.write_text(json.dumps(data, indent=2))
 
 
-@app.get("/api/crystals/<exp_name>")
+@app.get("/api/crystals/<path:exp_name>")
 def api_get_crystals(exp_name: str):
     """Return list of all crystals in an experiment."""
     data = load_crystals(exp_name)
     return jsonify(data.get("crystals", []))
 
 
-@app.post("/api/crystals/<exp_name>")
+@app.post("/api/crystals/<path:exp_name>")
 def api_create_crystal(exp_name: str):
     """Create a new crystal. Body: {notes: "optional notes"}"""
     data = request.get_json(force=True) or {}
@@ -1002,7 +1021,7 @@ def api_create_crystal(exp_name: str):
     return jsonify(new_crystal), 201
 
 
-@app.delete("/api/crystals/<exp_name>/<crystal_id>")
+@app.delete("/api/crystals/<path:exp_name>/<crystal_id>")
 def api_delete_crystal(exp_name: str, crystal_id: str):
     """Delete a crystal and its associated measurements."""
     crystals = load_crystals(exp_name)
@@ -1019,7 +1038,7 @@ def api_delete_crystal(exp_name: str, crystal_id: str):
     return jsonify({"ok": True})
 
 
-@app.put("/api/crystals/<exp_name>/<crystal_id>/nucleation")
+@app.put("/api/crystals/<path:exp_name>/<crystal_id>/nucleation")
 def api_set_crystal_nucleation(exp_name: str, crystal_id: str):
     """Set nucleation time for a crystal. Body: {nucleation_frame_idx: N, nucleation_timestamp_iso: "..."}"""
     data = request.get_json(force=True)
@@ -1037,7 +1056,7 @@ def api_set_crystal_nucleation(exp_name: str, crystal_id: str):
 
 # ── measurements ──────────────────────────────────────────────────────────────
 
-@app.get("/api/lengths/<exp_name>")
+@app.get("/api/lengths/<path:exp_name>")
 def api_get_lengths(exp_name: str):
     """Return all length measurements as a JSON array, optionally filtered by crystal_id.
     Only shows measurements for crystals that are defined in crystals.json.
@@ -1079,7 +1098,7 @@ def api_get_lengths(exp_name: str):
     return jsonify(lines)
 
 
-@app.post("/api/lengths/<exp_name>")
+@app.post("/api/lengths/<path:exp_name>")
 def api_add_length(exp_name: str):
     """Append one measurement line to lengths.jsonl.
     Body: {crystal_id: "crystal_1", frame_idx: N, ...}
@@ -1101,7 +1120,7 @@ def api_add_length(exp_name: str):
     return jsonify({"ok": True, "id": data["id"]})
 
 
-@app.delete("/api/lengths/<exp_name>/<crystal_id>/<measurement_id>")
+@app.delete("/api/lengths/<path:exp_name>/<crystal_id>/<measurement_id>")
 def api_delete_length(exp_name: str, crystal_id: str, measurement_id: str):
     """Delete a single measurement by its UUID id field."""
     _migrate_lengths_ids(exp_name)
@@ -1136,12 +1155,12 @@ def api_delete_length(exp_name: str, crystal_id: str, measurement_id: str):
 
 # ── settings ──────────────────────────────────────────────────────────────────
 
-@app.get("/api/settings/<exp_name>")
+@app.get("/api/settings/<path:exp_name>")
 def api_get_settings(exp_name: str):
     return jsonify(load_settings(exp_name))
 
 
-@app.post("/api/settings/<exp_name>")
+@app.post("/api/settings/<path:exp_name>")
 def api_save_settings(exp_name: str):
     data = request.get_json(force=True) or {}
     # Validate numeric fields
@@ -1157,7 +1176,7 @@ def api_save_settings(exp_name: str):
 
 # ── crystal notes PATCH ────────────────────────────────────────────────────────
 
-@app.route("/api/crystals/<exp_name>/<crystal_id>", methods=["PATCH"])
+@app.route("/api/crystals/<path:exp_name>/<crystal_id>", methods=["PATCH"])
 def api_patch_crystal(exp_name: str, crystal_id: str):
     """Update notes (or other fields) for a crystal."""
     data = request.get_json(force=True) or {}
@@ -1177,7 +1196,7 @@ def api_patch_crystal(exp_name: str, crystal_id: str):
 
 # ── cache reset ────────────────────────────────────────────────────────────────
 
-@app.post("/api/reset_cache/<exp_name>")
+@app.post("/api/reset_cache/<path:exp_name>")
 def api_reset_cache(exp_name: str):
     """Evict all cached reference frames for this experiment."""
     to_remove = [k for k in _ref_cache if k[0] == exp_name]
@@ -1188,7 +1207,7 @@ def api_reset_cache(exp_name: str):
 
 # ── export: CSV ────────────────────────────────────────────────────────────────
 
-@app.get("/api/export/<exp_name>/csv")
+@app.get("/api/export/<path:exp_name>/csv")
 def api_export_csv(exp_name: str):
     """Export all measurements as CSV download."""
     exp_path = DATA_ROOT / exp_name
@@ -1248,11 +1267,554 @@ def api_export_csv(exp_name: str):
 
 # ── export: progress ───────────────────────────────────────────────────────────
 
-@app.get("/api/export/<exp_name>/progress")
+@app.get("/api/export/<path:exp_name>/progress")
 def api_export_progress(exp_name: str):
     """Return current export progress for polling."""
     prog = _export_progress.get(exp_name, {"current": 0, "total": 0, "done": True})
     return jsonify(prog)
+
+
+# =============================================================================
+# GANTRY CONTROLLER — integrated web UI
+# =============================================================================
+
+# ── serial port detection ─────────────────────────────────────────────────────
+
+GANTRY_DEFAULTS = {
+    "baud": 115200,
+    "xy_speed": 3000,
+    "settle_time": 0.5,
+    "camera_index": 0,
+    "warmup_frames": 5,
+}
+
+# Global state for the gantry session
+_gantry_state: Dict = {
+    "ser": None,            # serial.Serial object
+    "port": None,
+    "current_x": 0.0,
+    "current_y": 0.0,
+    "connected": False,
+    "camera": None,         # cv2.VideoCapture
+    "camera_ok": False,
+    "positions": [],        # marked droplet positions
+    "step": 5.0,            # mm per jog
+    "monitor_running": False,
+    "monitor_thread": None,
+    "monitor_log": [],      # recent log lines
+}
+_gantry_lock = threading.Lock()
+
+
+def _find_printer_port() -> Optional[str]:
+    """Auto-detect Ender 5 Pro serial port."""
+    if not HAS_SERIAL:
+        return None
+    patterns = ['usbserial', 'wchusbserial', 'SLAB_USB', 'usbmodem']
+    ports = serial.tools.list_ports.comports()
+    for port in ports:
+        device = port.device.lower()
+        for pat in patterns:
+            if pat.lower() in device:
+                return port.device
+    for pat in patterns:
+        matches = globmod.glob(f"/dev/cu.*{pat}*")
+        if matches:
+            return matches[0]
+    return None
+
+
+def _gantry_send(cmd: str, timeout: float = 30.0) -> str:
+    """Send G-code command and wait for 'ok' from Marlin."""
+    ser = _gantry_state["ser"]
+    if ser is None or not ser.is_open:
+        return ""
+    ser.write(f"{cmd}\n".encode())
+    start = time.time()
+    while time.time() - start < timeout:
+        if ser.in_waiting:
+            line = ser.readline().decode(errors='replace').strip()
+            if line.startswith("ok"):
+                return line
+            if "Error" in line or "error" in line:
+                return line
+        time.sleep(0.05)
+    return ""
+
+
+def _gantry_move_to(x: float, y: float):
+    """Move gantry to absolute XY."""
+    _gantry_send("G90")
+    _gantry_send(f"G1 X{x:.2f} Y{y:.2f} F{GANTRY_DEFAULTS['xy_speed']}")
+    _gantry_send("M400")
+    _gantry_state["current_x"] = x
+    _gantry_state["current_y"] = y
+
+
+def _gantry_move_relative(dx: float = 0, dy: float = 0):
+    """Move gantry relative to current position."""
+    _gantry_send("G91")
+    _gantry_send(f"G1 X{dx:.2f} Y{dy:.2f} F{GANTRY_DEFAULTS['xy_speed']}")
+    _gantry_send("M400")
+    _gantry_send("G90")
+    _gantry_state["current_x"] += dx
+    _gantry_state["current_y"] += dy
+
+
+# ── gantry page ───────────────────────────────────────────────────────────────
+
+@app.get("/gantry")
+def gantry_page():
+    return render_template("gantry.html")
+
+
+# ── gantry API routes ─────────────────────────────────────────────────────────
+
+@app.get("/api/gantry/status")
+def api_gantry_status():
+    """Return current gantry state."""
+    return jsonify({
+        "connected": _gantry_state["connected"],
+        "port": _gantry_state["port"],
+        "x": _gantry_state["current_x"],
+        "y": _gantry_state["current_y"],
+        "step": _gantry_state["step"],
+        "camera_ok": _gantry_state["camera_ok"],
+        "positions": _gantry_state["positions"],
+        "monitor_running": _gantry_state["monitor_running"],
+        "monitor_log": _gantry_state["monitor_log"][-50:],
+    })
+
+
+@app.get("/api/gantry/ports")
+def api_gantry_ports():
+    """List available serial ports."""
+    if not HAS_SERIAL:
+        return jsonify({"ports": [], "error": "pyserial not installed"})
+    ports = serial.tools.list_ports.comports()
+    return jsonify({
+        "ports": [{"device": p.device, "description": p.description} for p in ports],
+        "auto": _find_printer_port(),
+    })
+
+
+@app.post("/api/gantry/connect")
+def api_gantry_connect():
+    """Connect to the gantry (Ender 5 Pro) via serial."""
+    if not HAS_SERIAL:
+        return jsonify({"error": "pyserial not installed. Run: pip install pyserial"}), 501
+
+    data = request.get_json(force=True) or {}
+    port = data.get("port", "auto")
+    baud = int(data.get("baud", GANTRY_DEFAULTS["baud"]))
+
+    with _gantry_lock:
+        # Already connected?
+        if _gantry_state["connected"] and _gantry_state["ser"] and _gantry_state["ser"].is_open:
+            return jsonify({"ok": True, "port": _gantry_state["port"], "msg": "Already connected"})
+
+        if port == "auto":
+            port = _find_printer_port()
+            if port is None:
+                return jsonify({"error": "Could not auto-detect printer port. Is it plugged in?"}), 400
+
+        try:
+            ser = serial.Serial(port, baud, timeout=10)
+            time.sleep(2)  # Wait for Marlin boot
+            # Flush startup messages
+            while ser.in_waiting:
+                ser.readline()
+            ser.write(b"\n")
+            time.sleep(0.5)
+            while ser.in_waiting:
+                ser.readline()
+
+            _gantry_state["ser"] = ser
+            _gantry_state["port"] = port
+            _gantry_state["connected"] = True
+            _gantry_state["current_x"] = 0.0
+            _gantry_state["current_y"] = 0.0
+
+            # Safety: disable heaters
+            _gantry_send("M104 S0")
+            _gantry_send("M140 S0")
+
+            return jsonify({"ok": True, "port": port})
+        except Exception as e:
+            return jsonify({"error": f"Connection failed: {e}"}), 400
+
+
+@app.post("/api/gantry/disconnect")
+def api_gantry_disconnect():
+    """Disconnect from gantry and release camera."""
+    with _gantry_lock:
+        if _gantry_state["ser"] and _gantry_state["ser"].is_open:
+            _gantry_send("M104 S0")
+            _gantry_send("M140 S0")
+            _gantry_state["ser"].close()
+        _gantry_state["ser"] = None
+        _gantry_state["connected"] = False
+        _gantry_state["port"] = None
+
+        if _gantry_state["camera"] is not None:
+            _gantry_state["camera"].release()
+            _gantry_state["camera"] = None
+            _gantry_state["camera_ok"] = False
+
+    return jsonify({"ok": True})
+
+
+@app.post("/api/gantry/home")
+def api_gantry_home():
+    """Home X and Y axes."""
+    if not _gantry_state["connected"]:
+        return jsonify({"error": "Not connected"}), 400
+    with _gantry_lock:
+        _gantry_send("G28 X Y", timeout=60)
+        _gantry_send("G90")
+        _gantry_send("M400")
+        _gantry_state["current_x"] = 0.0
+        _gantry_state["current_y"] = 0.0
+    return jsonify({"ok": True, "x": 0.0, "y": 0.0})
+
+
+@app.post("/api/gantry/jog")
+def api_gantry_jog():
+    """Jog gantry in a direction. Body: {direction: "x+"|"x-"|"y+"|"y-", step: float}"""
+    if not _gantry_state["connected"]:
+        return jsonify({"error": "Not connected"}), 400
+    data = request.get_json(force=True) or {}
+    direction = data.get("direction", "")
+    step = float(data.get("step", _gantry_state["step"]))
+    _gantry_state["step"] = step
+
+    with _gantry_lock:
+        if direction == "x+":
+            _gantry_move_relative(dx=step)
+        elif direction == "x-":
+            _gantry_move_relative(dx=-step)
+        elif direction == "y+":
+            _gantry_move_relative(dy=step)
+        elif direction == "y-":
+            _gantry_move_relative(dy=-step)
+        else:
+            return jsonify({"error": f"Invalid direction: {direction}"}), 400
+
+    return jsonify({
+        "ok": True,
+        "x": round(_gantry_state["current_x"], 2),
+        "y": round(_gantry_state["current_y"], 2),
+    })
+
+
+@app.post("/api/gantry/move_to")
+def api_gantry_move_to():
+    """Move to absolute XY. Body: {x: float, y: float}"""
+    if not _gantry_state["connected"]:
+        return jsonify({"error": "Not connected"}), 400
+    data = request.get_json(force=True) or {}
+    x = float(data.get("x", _gantry_state["current_x"]))
+    y = float(data.get("y", _gantry_state["current_y"]))
+    with _gantry_lock:
+        _gantry_move_to(x, y)
+    return jsonify({"ok": True, "x": round(x, 2), "y": round(y, 2)})
+
+
+@app.post("/api/gantry/step")
+def api_gantry_set_step():
+    """Set step size. Body: {step: float}"""
+    data = request.get_json(force=True) or {}
+    _gantry_state["step"] = max(0.1, min(50, float(data.get("step", 5.0))))
+    return jsonify({"ok": True, "step": _gantry_state["step"]})
+
+
+# ── camera ────────────────────────────────────────────────────────────────────
+
+@app.post("/api/gantry/camera/open")
+def api_gantry_camera_open():
+    """Open the USB microscope camera."""
+    if not HAS_CV2:
+        return jsonify({"error": "opencv-python not installed"}), 501
+    data = request.get_json(force=True) or {}
+    idx = int(data.get("camera_index", GANTRY_DEFAULTS["camera_index"]))
+
+    with _gantry_lock:
+        if _gantry_state["camera"] is not None:
+            _gantry_state["camera"].release()
+        cap = cv2.VideoCapture(idx)
+        if not cap.isOpened():
+            return jsonify({"error": f"Could not open camera index {idx}"}), 400
+        # Warmup
+        for _ in range(GANTRY_DEFAULTS["warmup_frames"]):
+            cap.read()
+            time.sleep(0.1)
+        _gantry_state["camera"] = cap
+        _gantry_state["camera_ok"] = True
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    return jsonify({"ok": True, "width": w, "height": h})
+
+
+@app.post("/api/gantry/camera/close")
+def api_gantry_camera_close():
+    """Close the camera."""
+    with _gantry_lock:
+        if _gantry_state["camera"] is not None:
+            _gantry_state["camera"].release()
+            _gantry_state["camera"] = None
+            _gantry_state["camera_ok"] = False
+    return jsonify({"ok": True})
+
+
+@app.get("/api/gantry/camera/snapshot")
+def api_gantry_camera_snapshot():
+    """Return a single JPEG snapshot from the camera."""
+    if not _gantry_state["camera_ok"] or _gantry_state["camera"] is None:
+        return jsonify({"error": "Camera not open"}), 400
+    ret, frame = _gantry_state["camera"].read()
+    if not ret or frame is None:
+        return jsonify({"error": "Capture failed"}), 500
+    _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return Response(buf.tobytes(), mimetype='image/jpeg')
+
+
+@app.get("/api/gantry/camera/stream")
+def api_gantry_camera_stream():
+    """MJPEG stream from the USB microscope."""
+    def generate():
+        while _gantry_state["camera_ok"] and _gantry_state["camera"] is not None:
+            ret, frame = _gantry_state["camera"].read()
+            if not ret or frame is None:
+                time.sleep(0.1)
+                continue
+            # Overlay position info
+            x, y = _gantry_state["current_x"], _gantry_state["current_y"]
+            cv2.putText(frame, f"X={x:.1f} Y={y:.1f}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n')
+            time.sleep(0.05)  # ~20 fps cap
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+# ── positions ─────────────────────────────────────────────────────────────────
+
+@app.post("/api/gantry/mark")
+def api_gantry_mark():
+    """Mark current position as a droplet. Optionally pass {id: "custom_name"}."""
+    data = request.get_json(force=True) or {}
+    count = len(_gantry_state["positions"]) + 1
+    pos_id = data.get("id", f"droplet_{count:03d}")
+    pos = {
+        "id": pos_id,
+        "x": round(_gantry_state["current_x"], 2),
+        "y": round(_gantry_state["current_y"], 2),
+    }
+    _gantry_state["positions"].append(pos)
+
+    # Save preview if camera available
+    if _gantry_state["camera_ok"] and _gantry_state["camera"] is not None:
+        ret, frame = _gantry_state["camera"].read()
+        if ret and frame is not None:
+            preview_dir = Path("calibration_previews")
+            preview_dir.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(preview_dir / f"{pos_id}.png"), frame)
+
+    return jsonify({"ok": True, "position": pos, "total": len(_gantry_state["positions"])})
+
+
+@app.delete("/api/gantry/positions/<pos_id>")
+def api_gantry_remove_position(pos_id: str):
+    """Remove a marked position by id."""
+    before = len(_gantry_state["positions"])
+    _gantry_state["positions"] = [p for p in _gantry_state["positions"] if p["id"] != pos_id]
+    if len(_gantry_state["positions"]) == before:
+        return jsonify({"error": "Position not found"}), 404
+    return jsonify({"ok": True, "remaining": len(_gantry_state["positions"])})
+
+
+@app.delete("/api/gantry/positions")
+def api_gantry_clear_positions():
+    """Remove all marked positions."""
+    _gantry_state["positions"] = []
+    return jsonify({"ok": True})
+
+
+@app.post("/api/gantry/positions/save")
+def api_gantry_save_positions():
+    """Save positions to a JSON file. Body: {path: "positions.json"}"""
+    data = request.get_json(force=True) or {}
+    path = data.get("path", "positions.json")
+    with open(path, 'w') as f:
+        json.dump(_gantry_state["positions"], f, indent=2)
+    return jsonify({"ok": True, "path": path, "count": len(_gantry_state["positions"])})
+
+
+@app.post("/api/gantry/positions/load")
+def api_gantry_load_positions():
+    """Load positions from a JSON file. Body: {path: "positions.json"}"""
+    data = request.get_json(force=True) or {}
+    path = data.get("path", "positions.json")
+    if not Path(path).exists():
+        return jsonify({"error": f"File not found: {path}"}), 404
+    with open(path) as f:
+        _gantry_state["positions"] = json.load(f)
+    return jsonify({"ok": True, "count": len(_gantry_state["positions"]),
+                    "positions": _gantry_state["positions"]})
+
+
+@app.post("/api/gantry/goto/<pos_id>")
+def api_gantry_goto_position(pos_id: str):
+    """Move gantry to a previously marked position."""
+    if not _gantry_state["connected"]:
+        return jsonify({"error": "Not connected"}), 400
+    pos = next((p for p in _gantry_state["positions"] if p["id"] == pos_id), None)
+    if pos is None:
+        return jsonify({"error": "Position not found"}), 404
+    with _gantry_lock:
+        _gantry_move_to(pos["x"], pos["y"])
+    return jsonify({"ok": True, "x": pos["x"], "y": pos["y"]})
+
+
+# ── scan & monitor ────────────────────────────────────────────────────────────
+
+@app.post("/api/gantry/scan")
+def api_gantry_scan():
+    """One-shot scan: visit each position and capture an image.
+    Body: {name: "exp_name"} — creates <name>_droplet_NNN experiments."""
+    if not _gantry_state["connected"]:
+        return jsonify({"error": "Not connected"}), 400
+    if not _gantry_state["camera_ok"]:
+        return jsonify({"error": "Camera not open"}), 400
+    if not _gantry_state["positions"]:
+        return jsonify({"error": "No positions marked"}), 400
+
+    data = request.get_json(force=True) or {}
+    exp_name = data.get("name", f"scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    exp_base = Path(data.get("experiments_dir", str(DATA_ROOT)))
+
+    captured = 0
+    failed = 0
+
+    for pos in _gantry_state["positions"]:
+        with _gantry_lock:
+            _gantry_move_to(pos["x"], pos["y"])
+        time.sleep(GANTRY_DEFAULTS["settle_time"])
+
+        ret, frame = _gantry_state["camera"].read()
+        raw_dir = exp_base / exp_name / pos['id'] / "raw_images"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+
+        if ret and frame is not None:
+            fname = f"img_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            cv2.imwrite(str(raw_dir / fname), frame)
+            captured += 1
+        else:
+            failed += 1
+
+    return jsonify({
+        "ok": True,
+        "experiment": exp_name,
+        "captured": captured,
+        "failed": failed,
+    })
+
+
+def _monitor_loop(exp_name: str, exp_base: Path, interval: float,
+                   duration_h: Optional[float]):
+    """Background thread for continuous monitoring."""
+    start_time = time.time()
+    cycle = 0
+    log = _gantry_state["monitor_log"]
+
+    while _gantry_state["monitor_running"]:
+        if duration_h:
+            elapsed_h = (time.time() - start_time) / 3600
+            if elapsed_h >= duration_h:
+                log.append(f"Duration limit reached ({duration_h}h). Stopping.")
+                break
+
+        sweep_start = time.time()
+        captured = 0
+
+        for pos in _gantry_state["positions"]:
+            if not _gantry_state["monitor_running"]:
+                break
+            with _gantry_lock:
+                _gantry_move_to(pos["x"], pos["y"])
+            time.sleep(GANTRY_DEFAULTS["settle_time"])
+
+            if _gantry_state["camera"] is not None:
+                ret, frame = _gantry_state["camera"].read()
+                if ret and frame is not None:
+                    raw_dir = exp_base / exp_name / pos['id'] / "raw_images"
+                    raw_dir.mkdir(parents=True, exist_ok=True)
+                    fname = f"img_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                    cv2.imwrite(str(raw_dir / fname), frame)
+                    captured += 1
+
+        elapsed_total = (time.time() - start_time) / 3600
+        msg = (f"Cycle {cycle}: {captured}/{len(_gantry_state['positions'])} captured, "
+               f"elapsed {elapsed_total:.1f}h")
+        log.append(msg)
+        # Keep log bounded
+        if len(log) > 200:
+            del log[:100]
+        cycle += 1
+
+        # Wait for next sweep
+        wait_time = max(0, interval - (time.time() - sweep_start))
+        sleep_end = time.time() + wait_time
+        while _gantry_state["monitor_running"] and time.time() < sleep_end:
+            time.sleep(1)
+
+    _gantry_state["monitor_running"] = False
+    log.append("Monitor stopped.")
+
+
+@app.post("/api/gantry/monitor/start")
+def api_gantry_monitor_start():
+    """Start continuous monitoring. Body: {name, interval, duration}"""
+    if not _gantry_state["connected"]:
+        return jsonify({"error": "Not connected"}), 400
+    if not _gantry_state["camera_ok"]:
+        return jsonify({"error": "Camera not open"}), 400
+    if not _gantry_state["positions"]:
+        return jsonify({"error": "No positions marked"}), 400
+    if _gantry_state["monitor_running"]:
+        return jsonify({"error": "Monitor already running"}), 400
+
+    data = request.get_json(force=True) or {}
+    exp_name = data.get("name", f"monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    interval = float(data.get("interval", 1800))
+    duration = data.get("duration")
+    if duration is not None:
+        duration = float(duration)
+    exp_base = Path(data.get("experiments_dir", str(DATA_ROOT)))
+
+    # Create folders upfront
+    for pos in _gantry_state["positions"]:
+        (exp_base / exp_name / pos['id'] / "raw_images").mkdir(parents=True, exist_ok=True)
+
+    _gantry_state["monitor_running"] = True
+    _gantry_state["monitor_log"] = [f"Started: {exp_name}, interval={interval}s"]
+    t = threading.Thread(
+        target=_monitor_loop,
+        args=(exp_name, exp_base, interval, duration),
+        daemon=True,
+    )
+    _gantry_state["monitor_thread"] = t
+    t.start()
+
+    return jsonify({"ok": True, "experiment": exp_name})
+
+
+@app.post("/api/gantry/monitor/stop")
+def api_gantry_monitor_stop():
+    """Stop the running monitor."""
+    _gantry_state["monitor_running"] = False
+    return jsonify({"ok": True})
 
 
 # ─── main ────────────────────────────────────────────────────────────────────
@@ -1268,5 +1830,7 @@ if __name__ == "__main__":
     print("    PUT  /api/crystals/<exp_name>/<id>/nucleation - Set nucleation time")
     print("    GET  /api/lengths/<exp_name>?crystal_id=<id> - Get measurements")
     print()
-    print("  Open  http://localhost:8000  in your browser.\n")
+    print("  Pages:")
+    print("    http://localhost:8000            - Crystal Annotator")
+    print("    http://localhost:8000/gantry     - Gantry Controller\n")
     app.run(host="127.0.0.1", port=8000, debug=False)
