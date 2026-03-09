@@ -9,6 +9,9 @@ Pillow>=9.0
 flask
 openpyxl
 
+# Gantry controller & annotator serial communication
+pyserial>=3.5
+
 # Optional: for deep learning U-Net training
 # torch>=2.0
 # torchvision>=0.15
