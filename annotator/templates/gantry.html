@@ -141,6 +141,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
       <div style="margin-top:8px;display:flex;gap:6px">
         <button class="btn" id="btn-cam-open" onclick="openCamera()">Open Camera</button>
         <button class="btn" id="btn-cam-close" onclick="closeCamera()" disabled>Close Camera</button>
+        <button class="btn" id="btn-led-toggle" onclick="toggleLED()" disabled>Light OFF</button>
       </div>
     </div>
 
@@ -268,6 +269,13 @@ function updateUI(status) {
   document.getElementById('btn-disconnect').disabled = !connected;
   document.getElementById('btn-home').disabled = !connected;
   document.getElementById('btn-cam-close').disabled = !cameraOpen;
+  const ledBtn = document.getElementById('btn-led-toggle');
+  ledBtn.disabled = !cameraOpen;
+  if (cameraOpen) {
+    const ledOn = status.led_on !== false;
+    ledBtn.textContent = ledOn ? 'Light OFF' : 'Light ON';
+    ledBtn.className = ledOn ? 'btn' : 'btn active';
+  }
   document.getElementById('step-input').value = step;
 
   document.getElementById('btn-mon-start').disabled = status.monitor_running;
@@ -304,6 +312,7 @@ async function connectGantry() {
     const res = await apiPost('/api/gantry/connect', {port});
     if (res.error) { toast(res.error, 'error'); return; }
     toast(`Connected to ${res.port}`, 'success');
+    if (res.warning) { toast(res.warning, 'error', 8000); }
     await refreshStatus();
   } catch(e) { toast('Connection failed: ' + e, 'error'); }
   finally {
@@ -351,6 +360,15 @@ async function closeCamera() {
   $feedImg.style.display = 'none';
   $feedPlaceholder.style.display = '';
   toast('Camera closed', 'info');
+}
+
+async function toggleLED() {
+  const res = await apiPost('/api/gantry/camera/led');
+  if (res.error) { toast(res.error, 'error'); return; }
+  const btn = document.getElementById('btn-led-toggle');
+  btn.textContent = res.led_on ? 'Light OFF' : 'Light ON';
+  btn.className = res.led_on ? 'btn' : 'btn active';
+  toast(res.led_on ? 'Light turned ON' : 'Light turned OFF', 'info');
 }
 
 function startStream() {

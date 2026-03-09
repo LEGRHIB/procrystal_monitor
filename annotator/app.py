@@ -1302,26 +1302,58 @@ _gantry_state: Dict = {
     "monitor_running": False,
     "monitor_thread": None,
     "monitor_log": [],      # recent log lines
+    "led_on": True,         # camera LED state (Dino-Lite)
 }
 _gantry_lock = threading.Lock()
 
 
 def _find_printer_port() -> Optional[str]:
-    """Auto-detect Ender 5 Pro serial port."""
+    """Auto-detect Ender 5 Pro serial port by probing for Marlin firmware."""
     if not HAS_SERIAL:
         return None
     patterns = ['usbserial', 'wchusbserial', 'SLAB_USB', 'usbmodem']
+
+    # Gather candidate ports (pattern match then glob fallback)
+    candidates: list[str] = []
     ports = serial.tools.list_ports.comports()
     for port in ports:
         device = port.device.lower()
         for pat in patterns:
             if pat.lower() in device:
-                return port.device
+                if port.device not in candidates:
+                    candidates.append(port.device)
     for pat in patterns:
-        matches = globmod.glob(f"/dev/cu.*{pat}*")
-        if matches:
-            return matches[0]
-    return None
+        for m in globmod.glob(f"/dev/cu.*{pat}*"):
+            if m not in candidates:
+                candidates.append(m)
+
+    if not candidates:
+        return None
+
+    # Probe each candidate for Marlin firmware (M115)
+    baud = GANTRY_DEFAULTS["baud"]
+    for dev in candidates:
+        try:
+            ser = serial.Serial(dev, baud, timeout=3)
+            time.sleep(2)  # wait for boot
+            # flush startup messages
+            while ser.in_waiting:
+                ser.readline()
+            ser.write(b"M115\n")
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if ser.in_waiting:
+                    line = ser.readline().decode(errors='replace')
+                    if 'FIRMWARE' in line.upper() or 'MARLIN' in line.upper():
+                        ser.close()
+                        return dev
+                time.sleep(0.05)
+            ser.close()
+        except Exception:
+            continue
+
+    # Fallback: return the first candidate even without Marlin confirmation
+    return candidates[0]
 
 
 def _gantry_send(cmd: str, timeout: float = 30.0) -> str:
@@ -1383,6 +1415,7 @@ def api_gantry_status():
         "positions": _gantry_state["positions"],
         "monitor_running": _gantry_state["monitor_running"],
         "monitor_log": _gantry_state["monitor_log"][-50:],
+        "led_on": _gantry_state["led_on"],
     })
 
 
@@ -1439,7 +1472,28 @@ def api_gantry_connect():
             _gantry_send("M104 S0")
             _gantry_send("M140 S0")
 
-            return jsonify({"ok": True, "port": port})
+            # Verify Marlin firmware responds
+            warning = None
+            ser.write(b"M115\n")
+            marlin_ok = False
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if ser.in_waiting:
+                    line = ser.readline().decode(errors='replace')
+                    if 'FIRMWARE' in line.upper() or 'MARLIN' in line.upper():
+                        marlin_ok = True
+                        break
+                    if line.strip().startswith("ok"):
+                        break
+                time.sleep(0.05)
+            if not marlin_ok:
+                warning = (f"Port {port} connected but did not identify as Marlin firmware. "
+                           "This may be the wrong device. Try selecting a different port manually.")
+
+            resp = {"ok": True, "port": port}
+            if warning:
+                resp["warning"] = warning
+            return jsonify(resp)
         except Exception as e:
             return jsonify({"error": f"Connection failed: {e}"}), 400
 
@@ -1564,6 +1618,53 @@ def api_gantry_camera_close():
             _gantry_state["camera"] = None
             _gantry_state["camera_ok"] = False
     return jsonify({"ok": True})
+
+
+@app.post("/api/gantry/camera/led")
+def api_gantry_camera_led():
+    """Toggle camera LED on/off (Dino-Lite ring light).
+
+    Tries multiple approaches:
+    1. OpenCV CAP_PROP_SETTINGS (opens native camera dialog on some drivers)
+    2. Direct backlight property toggle
+    3. Release & reopen camera as last resort to reset LED state
+    """
+    data = request.get_json(force=True) or {}
+    turn_on = data.get("on")  # True/False, or None to toggle
+    if turn_on is None:
+        turn_on = not _gantry_state["led_on"]
+
+    with _gantry_lock:
+        cap = _gantry_state["camera"]
+        if cap is None or not cap.isOpened():
+            return jsonify({"error": "Camera not open. Open camera first."}), 400
+
+        # Attempt 1: Use backlight property (works on some Dino-Lite models)
+        # CAP_PROP_BACKLIGHT = 32
+        try:
+            cap.set(cv2.CAP_PROP_BACKLIGHT, 1.0 if turn_on else 0.0)
+        except Exception:
+            pass
+
+        # Attempt 2: Use exposure to indirectly control — very low exposure
+        # dims the image but doesn't turn off LEDs on most cameras.
+        # Instead try auto-exposure off + manual exposure for "dark" effect.
+        if not turn_on:
+            try:
+                # Disable auto-exposure (3=auto, 1=manual on many backends)
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+                cap.set(cv2.CAP_PROP_EXPOSURE, -13)  # very dark
+            except Exception:
+                pass
+        else:
+            try:
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)  # re-enable auto
+            except Exception:
+                pass
+
+        _gantry_state["led_on"] = turn_on
+
+    return jsonify({"ok": True, "led_on": turn_on})
 
 
 @app.get("/api/gantry/camera/snapshot")

@@ -76,33 +76,64 @@ WARMUP_FRAMES = 5       # discard first N frames (auto-exposure)
 # =============================================================
 
 def find_printer_port() -> Optional[str]:
-    """Auto-detect the Ender 5 Pro serial port on macOS."""
+    """Auto-detect the Ender 5 Pro serial port by probing for Marlin firmware."""
     if not HAS_SERIAL:
         return None
 
     # Look for CH340 / USB serial ports
     patterns = ['usbserial', 'wchusbserial', 'SLAB_USB', 'usbmodem']
-    ports = serial.tools.list_ports.comports()
 
+    # Gather candidate ports
+    candidates: list[str] = []
+    ports = serial.tools.list_ports.comports()
     for port in ports:
         device = port.device.lower()
         for pat in patterns:
             if pat.lower() in device:
-                return port.device
+                if port.device not in candidates:
+                    candidates.append(port.device)
 
     # Fallback: check /dev/cu.* on macOS
     for pat in patterns:
-        matches = glob.glob(f"/dev/cu.*{pat}*")
-        if matches:
-            return matches[0]
+        for m in glob.glob(f"/dev/cu.*{pat}*"):
+            if m not in candidates:
+                candidates.append(m)
 
-    # List all available ports for debugging
-    if ports:
-        print("  Available serial ports:")
-        for p in ports:
-            print(f"    {p.device} — {p.description}")
+    if not candidates:
+        # List all available ports for debugging
+        if ports:
+            print("  Available serial ports:")
+            for p in ports:
+                print(f"    {p.device} — {p.description}")
+        return None
 
-    return None
+    # Probe each candidate for Marlin firmware (M115)
+    for dev in candidates:
+        try:
+            print(f"  Probing {dev} for Marlin firmware...")
+            ser = serial.Serial(dev, DEFAULT_BAUD, timeout=3)
+            time.sleep(2)  # wait for boot
+            while ser.in_waiting:
+                ser.readline()
+            ser.write(b"M115\n")
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if ser.in_waiting:
+                    line = ser.readline().decode(errors='replace')
+                    if 'FIRMWARE' in line.upper() or 'MARLIN' in line.upper():
+                        print(f"  Found Marlin on {dev}")
+                        ser.close()
+                        return dev
+                time.sleep(0.05)
+            ser.close()
+            print(f"  {dev}: no Marlin response")
+        except Exception as e:
+            print(f"  {dev}: probe failed ({e})")
+            continue
+
+    # Fallback: return the first candidate even without Marlin confirmation
+    print(f"  Falling back to first candidate: {candidates[0]}")
+    return candidates[0]
 
 
 # =============================================================
